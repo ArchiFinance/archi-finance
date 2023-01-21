@@ -59,7 +59,7 @@ contract VaultRewardDistributor is Initializable, ReentrancyGuardUpgradeable, Ow
     }
 
     function setSupplyRewardPoolRatio(uint256 _ratio) public onlyOwner {
-        require(_ratio.add(borrowedRewardPoolRatio) <= MAX_RATIO, "VaultRewardDistributor: Too large");
+        require(_ratio.add(borrowedRewardPoolRatio) <= MAX_RATIO, "VaultRewardDistributor: Maximum limit exceeded");
 
         supplyRewardPoolRatio = _ratio;
 
@@ -67,7 +67,7 @@ contract VaultRewardDistributor is Initializable, ReentrancyGuardUpgradeable, Ow
     }
 
     function setBorrowedRewardPoolRatio(uint256 _ratio) public onlyOwner {
-        require(_ratio.add(supplyRewardPoolRatio) <= MAX_RATIO, "VaultRewardDistributor: Too large");
+        require(_ratio.add(supplyRewardPoolRatio) <= MAX_RATIO, "VaultRewardDistributor: Maximum limit exceeded");
 
         borrowedRewardPoolRatio = _ratio;
 
@@ -78,7 +78,7 @@ contract VaultRewardDistributor is Initializable, ReentrancyGuardUpgradeable, Ow
         require(_amountIn > 0, "VaultRewardDistributor: Amount cannot be 0");
 
         uint256 before = IERC20Upgradeable(stakingToken).balanceOf(address(this));
-        IERC20Upgradeable(stakingToken).safeTransferFrom(msg.sender, address(this), _amountIn);
+        IERC20Upgradeable(stakingToken).safeTransferFrom(caller, address(this), _amountIn);
         _amountIn = IERC20Upgradeable(stakingToken).balanceOf(address(this)) - before;
 
         emit Stake(_amountIn);
@@ -87,7 +87,7 @@ contract VaultRewardDistributor is Initializable, ReentrancyGuardUpgradeable, Ow
     function withdraw(uint256 _amountOut) external override onlyCaller returns (uint256) {
         require(_amountOut > 0, "VaultRewardDistributor: Amount cannot be 0");
 
-        IERC20Upgradeable(stakingToken).safeTransfer(msg.sender, _amountOut);
+        IERC20Upgradeable(stakingToken).safeTransfer(caller, _amountOut);
 
         emit Withdraw(_amountOut);
 

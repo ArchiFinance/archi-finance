@@ -35,6 +35,8 @@ contract ShareLocker {
     }
 
     function stake(uint256 _amountIn) public onlyVault {
+        _claim();
+
         IAbstractReward(rewardPool).stakeFor(address(this), _amountIn);
     }
 
@@ -45,29 +47,20 @@ contract ShareLocker {
     }
 
     function _claim() internal returns (uint256 claimed) {
-        claimed = IAbstractReward(rewardPool).claim();
-
         address rewardToken = IAbstractReward(rewardPool).rewardToken();
+
+        claimed = IAbstractReward(rewardPool).claim(address(this));
 
         if (claimed > 0) {
             IERC20(rewardToken).transfer(creditManager, claimed);
         }
     }
 
-    function claim() public onlyCreditManager returns (uint256 claimed) {
+    function harvest() external onlyCreditManager returns (uint256) {
         return _claim();
     }
 
     function pendingRewards() public view returns (uint256) {
         return IAbstractReward(rewardPool).pendingRewards(address(this));
-    }
-
-    function _approve(
-        address _token,
-        address _spender,
-        uint256 _amount
-    ) internal {
-        IERC20(_token).safeApprove(_spender, 0);
-        IERC20(_token).safeApprove(_spender, _amount);
     }
 }

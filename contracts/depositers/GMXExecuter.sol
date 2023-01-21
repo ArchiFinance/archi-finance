@@ -22,9 +22,9 @@ contract GMXExecuter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
 
     uint256 private constant MAX_INT = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
     address private constant ZERO = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    address private constant WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
 
     address public addressProvider;
+    address public wethAddress;
     address public deposter;
 
     modifier onlyDeposter() {
@@ -36,11 +36,16 @@ contract GMXExecuter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
     // solhint-disable-next-line no-empty-blocks
     constructor() initializer {}
 
-    function initialize(address _addressProvider, address _deposter) external initializer {
+    function initialize(
+        address _addressProvider,
+        address _wethAddress,
+        address _deposter
+    ) external initializer {
         __Ownable_init();
         __ReentrancyGuard_init();
 
         addressProvider = _addressProvider;
+        wethAddress = _wethAddress;
         deposter = _deposter;
 
         _transferOwnership(_deposter);
@@ -80,9 +85,8 @@ contract GMXExecuter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
         bool shouldClaimWeth = true;
         bool shouldConvertWethToEth = false;
 
-        uint256 before = IERC20Upgradeable(WETH).balanceOf(address(this));
-
-        address router = IAddressProvider(addressProvider).getGmxRewardRouter();
+        uint256 before = IERC20Upgradeable(wethAddress).balanceOf(address(this));
+        address router = IAddressProvider(addressProvider).getGmxRewardRouterV1();
 
         IGmxRewardRouter(router).handleRewards(
             shouldClaimGmx,
@@ -94,9 +98,9 @@ contract GMXExecuter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
             shouldConvertWethToEth
         );
 
-        uint256 rewards = IERC20Upgradeable(WETH).balanceOf(address(this)) - before;
+        uint256 rewards = IERC20Upgradeable(wethAddress).balanceOf(address(this)) - before;
 
-        IERC20Upgradeable(WETH).safeTransfer(deposter, rewards);
+        IERC20Upgradeable(wethAddress).safeTransfer(deposter, rewards);
 
         return rewards;
     }

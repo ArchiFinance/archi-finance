@@ -11,21 +11,23 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 
 import { IWETH } from "../interfaces/IWETH.sol";
 import { IGMXExecuter } from "./interfaces/IGMXExecuter.sol";
+import { IDeposter } from "./interfaces/IDeposter.sol";
 import { IDepositerRewardDistributor } from "../rewards/interfaces/IDepositerRewardDistributor.sol";
 
-contract GMXDeposter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgradeable {
+contract GMXDeposter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgradeable, IDeposter {
     using SafeMathUpgradeable for uint256;
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     address private constant ZERO = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    address private constant WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
     uint256 private constant FEE_DENOMINATOR = 100;
-    uint256 private constant MAX_PLATFORM_FEE = 10;
+    uint256 private constant MAX_PLATFORM_FEE = 15;
 
+    address public wethAddress;
     address public caller;
     address public executer;
     address public distributer;
     address public platform;
+    uint256 public platformFee;
 
     struct ClaimedReward {
         uint256 rewards;
@@ -42,22 +44,30 @@ contract GMXDeposter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
     // solhint-disable-next-line no-empty-blocks
     constructor() initializer {}
 
-    function initialize(address _caller, address _platform) external initializer {
+    function initialize(
+        address _caller,
+        address _wethAddress,
+        address _platform
+    ) external initializer {
         __ReentrancyGuard_init();
         __Ownable_init();
 
         caller = _caller;
+        wethAddress = _wethAddress;
         platform = _platform;
+        platformFee = 10;
     }
 
     // solhint-disable-next-line no-empty-blocks
     receive() external payable {}
 
-    function mint(address _token, uint256 _amountIn) public payable onlyCaller returns (address, uint256) {
-        if (_isETH(_token)) {
-            IWETH(WETH).deposit{ value: _amountIn }();
+    function mint(address _token, uint256 _amountIn) public payable override onlyCaller returns (address, uint256) {
+        _harvest();
 
-            _token = WETH;
+        if (_token == ZERO) {
+            _wrapETH(_amountIn);
+
+            _token = wethAddress;
         } else {
             uint256 before = IERC20Upgradeable(_token).balanceOf(address(this));
             IERC20Upgradeable(_token).safeTransferFrom(msg.sender, address(this), _amountIn);
@@ -68,6 +78,8 @@ contract GMXDeposter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
 
         (address mintedToken, uint256 amountOut) = IGMXExecuter(executer).mint(_token, _amountIn);
 
+        emit Mint(_token, _amountIn, amountOut);
+
         return (mintedToken, amountOut);
     }
 
@@ -75,35 +87,47 @@ contract GMXDeposter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
         address _tokenOut,
         uint256 _amountIn,
         uint256 _minOut
-    ) public payable onlyCaller returns (uint256) {
+    ) public payable override onlyCaller returns (uint256) {
+        _harvest();
+
         uint256 amountOut = IGMXExecuter(executer).withdraw(_tokenOut, _amountIn, _minOut);
 
         IERC20Upgradeable(_tokenOut).safeTransfer(msg.sender, amountOut);
 
+        emit Withdraw(_tokenOut, _amountIn, amountOut);
+
         return amountOut;
     }
 
-    function claimRewards() external nonReentrant returns (uint256) {
+    function _harvest() internal returns (uint256) {
         uint256 rewards;
 
         rewards = IGMXExecuter(executer).claimRewards();
 
         if (platform != address(0)) {
-            uint256 fees = rewards.mul(MAX_PLATFORM_FEE).div(FEE_DENOMINATOR);
+            uint256 fees = rewards.mul(platformFee).div(FEE_DENOMINATOR);
 
-            IERC20Upgradeable(WETH).safeTransfer(platform, fees);
+            IERC20Upgradeable(wethAddress).safeTransfer(platform, fees);
 
             rewards = rewards.sub(fees);
         }
 
-        ClaimedReward storage claimedReward = claimedRewards[WETH];
-        claimedReward.rewards = claimedReward.rewards.add(rewards);
+        if (rewards > 0) {
+            ClaimedReward storage claimedReward = claimedRewards[wethAddress];
+            claimedReward.rewards = claimedReward.rewards.add(rewards);
 
-        _approve(WETH, distributer, rewards);
+            _approve(wethAddress, distributer, rewards);
 
-        IDepositerRewardDistributor(distributer).distribute(rewards);
+            IDepositerRewardDistributor(distributer).distribute(rewards);
+
+            emit Harvest(rewards);
+        }
 
         return rewards;
+    }
+
+    function harvest() public nonReentrant returns (uint256) {
+        return _harvest();
     }
 
     function setExecuter(address _executer) external onlyOwner {
@@ -120,6 +144,12 @@ contract GMXDeposter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
         platform = _platform;
     }
 
+    function setPlatformFee(uint256 _platformFee) external onlyOwner {
+        require(_platformFee <= MAX_PLATFORM_FEE, "GMXDeposter: Maximum limit exceeded");
+
+        platformFee = _platformFee;
+    }
+
     function _approve(
         address _token,
         address _spender,
@@ -129,7 +159,9 @@ contract GMXDeposter is Initializable, ReentrancyGuardUpgradeable, OwnableUpgrad
         IERC20Upgradeable(_token).safeApprove(_spender, _amount);
     }
 
-    function _isETH(address _token) internal pure returns (bool) {
-        return _token == ZERO;
+    function _wrapETH(uint256 _amountIn) internal {
+        require(msg.value == _amountIn, "GMXDeposter: ETH amount mismatch");
+
+        IWETH(wethAddress).deposit{ value: _amountIn }();
     }
 }

@@ -13,7 +13,11 @@ interface IAbstractVault {
 
     function underlyingToken() external view returns (address);
 
-    function creditManagersShareLocker(address _manager) external view returns (address);
+    function creditManagersShareLocker(address _creditManager) external view returns (address);
+
+    function creditManagersCanBorrow(address _creditManager) external view returns (bool);
+
+    function creditManagersCanRepay(address _creditManager) external view returns (bool);
 
     event AddLiquidity(address indexed _recipient, uint256 _amountIn);
     event RemoveLiquidity(address indexed _recipient, uint256 _amountOut);
@@ -22,4 +26,6 @@ interface IAbstractVault {
     event SetSupplyRewardPool(address _rewardPool);
     event SetBorrowedRewardPool(address _rewardPool);
     event AddCreditManager(address _creditManager, address _shareLocker);
+    event ForbidCreditManagersCanRepay(address _creditManager);
+    event ForbidCreditManagerToBorrow(address _creditManager);
 }

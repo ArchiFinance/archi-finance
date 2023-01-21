@@ -6,10 +6,10 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 import { IAddressProvider } from "./interfaces/IAddressProvider.sol";
 
-bytes32 constant WETH_GATEWAP = "WETH_GATEWAP";
 bytes32 constant PRICE_ORACLE = "PRICE_ORACLE";
 bytes32 constant LIQUIDATER = "LIQUIDATER";
 bytes32 constant GMX_REWARD_ROUTER = "GMX_REWARD_ROUTER";
+bytes32 constant GMX_REWARD_ROUTER_V1 = "GMX_REWARD_ROUTER_V1";
 
 contract AddressProvider is Ownable, IAddressProvider {
     mapping(bytes32 => address) public addresses;
@@ -18,20 +18,20 @@ contract AddressProvider is Ownable, IAddressProvider {
         emit AddressSet("ADDRESS_PROVIDER", address(this));
     }
 
-    function getWETHGateway() external view override returns (address) {
-        return _getAddress(WETH_GATEWAP);
-    }
-
-    function setWETHGateway(address _v) external onlyOwner {
-        _setAddress(WETH_GATEWAP, _v);
-    }
-
     function getGmxRewardRouter() external view override returns (address) {
         return _getAddress(GMX_REWARD_ROUTER);
     }
 
     function setGmxRewardRouter(address _v) external onlyOwner {
         _setAddress(GMX_REWARD_ROUTER, _v);
+    }
+
+    function getGmxRewardRouterV1() external view override returns (address) {
+        return _getAddress(GMX_REWARD_ROUTER_V1);
+    }
+
+    function setGmxRewardRouterV1(address _v) external onlyOwner {
+        _setAddress(GMX_REWARD_ROUTER_V1, _v);
     }
 
     function getLiquidator() external view override returns (address) {

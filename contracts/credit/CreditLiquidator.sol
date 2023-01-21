@@ -17,6 +17,7 @@ contract CreditLiquidator is Initializable, ICreditLiquidator {
     using SafeMathUpgradeable for uint256;
 
     address private constant ZERO = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    uint256 private constant GMX_DIVISION_LOSS_COMPENSATION = 10000; // 0.01 %
     uint256 private constant PRICE_PRECISION = 1e30;
     uint256 private constant BASIS_POINTS_DIVISOR = 10000;
     uint256 private constant MINT_BURN_FEE_BASIS_POINTS = 25;
@@ -153,6 +154,7 @@ contract CreditLiquidator is Initializable, ICreditLiquidator {
         uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_swapToken, usdgAmount, MINT_BURN_FEE_BASIS_POINTS, TAX_BASIS_POINTS, false);
 
         glpAmount = glpAmount.mul(BASIS_POINTS_DIVISOR).div(BASIS_POINTS_DIVISOR - feeBasisPoints);
+        glpAmount = glpAmount.add(glpAmount.div(GMX_DIVISION_LOSS_COMPENSATION));
 
         return (glpAmount, feeBasisPoints);
     }

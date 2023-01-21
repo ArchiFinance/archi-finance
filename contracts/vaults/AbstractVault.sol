@@ -10,8 +10,8 @@ import { SafeMathUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/m
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-import { IAbstractVault } from "./interfaces/IAbstractVault.sol";
 import { Multicall } from "../libraries/Multicall.sol";
+import { IAbstractVault } from "./interfaces/IAbstractVault.sol";
 import { ShareLocker } from "./ShareLocker.sol";
 import { IAbstractReward } from "../rewards/interfaces/IAbstractReward.sol";
 
@@ -26,8 +26,8 @@ abstract contract AbstractVault is Initializable, ReentrancyGuardUpgradeable, Ow
     address[] public creditManagers;
 
     mapping(address => address) public override creditManagersShareLocker;
-    mapping(address => bool) public creditManagersCanBorrow;
-    mapping(address => bool) public creditManagersCanRepay;
+    mapping(address => bool) public override creditManagersCanBorrow;
+    mapping(address => bool) public override creditManagersCanRepay;
 
     modifier onlyCreditManagersCanBorrow(address _sender) {
         require(creditManagersCanBorrow[_sender], "AbstractVault: Caller is not the vault manager");
@@ -73,7 +73,11 @@ abstract contract AbstractVault is Initializable, ReentrancyGuardUpgradeable, Ow
     /** @dev this function is defined in a child contract */
     function _addLiquidity(uint256 _amountIn) internal virtual returns (uint256);
 
-    function removeLiquidity(uint256 _amountOut) external {
+    function removeLiquidity(uint256 _amountOut, uint256 _unstakedAmountIn) external {
+        if (_unstakedAmountIn > 0) {
+            IAbstractReward(supplyRewardPool).withdrawFor(msg.sender, _unstakedAmountIn);
+        }
+
         _burn(msg.sender, _amountOut);
 
         IERC20Upgradeable(underlyingToken).safeTransfer(msg.sender, _amountOut);
@@ -124,14 +128,6 @@ abstract contract AbstractVault is Initializable, ReentrancyGuardUpgradeable, Ow
         emit SetBorrowedRewardPool(_rewardPool);
     }
 
-    function availableLiquidity() public view returns (uint256) {
-        return IERC20Upgradeable(underlyingToken).balanceOf(address(this));
-    }
-
-    function getBlockNumber() internal view virtual returns (uint256) {
-        return block.number;
-    }
-
     function creditManagersCount() external view returns (uint256) {
         return creditManagers.length;
     }
@@ -146,5 +142,21 @@ abstract contract AbstractVault is Initializable, ReentrancyGuardUpgradeable, Ow
         creditManagers.push(_creditManager);
 
         emit AddCreditManager(_creditManager, creditManagersShareLocker[_creditManager]);
+    }
+
+    function forbidCreditManagerToBorrow(address _creditManager) external onlyOwner {
+        creditManagersCanBorrow[_creditManager] = false;
+
+        emit ForbidCreditManagerToBorrow(_creditManager);
+    }
+
+    function forbidCreditManagersCanRepay(address _creditManager) external onlyOwner {
+        creditManagersCanRepay[_creditManager] = false;
+
+        emit ForbidCreditManagersCanRepay(_creditManager);
+    }
+
+    function claim(address _recipient) external returns (uint256 claimed) {
+        return IAbstractReward(supplyRewardPool).claim(_recipient);
     }
 }

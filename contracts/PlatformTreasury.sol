@@ -12,7 +12,7 @@ contract PlatformTreasury {
 
     address public operator;
 
-    event WithdrawTo(address indexed _user, uint256 _amount);
+    event WithdrawTo(address indexed _recipient, uint256 _amountOut);
 
     modifier onlyOperator() {
         require(msg.sender == operator, "PlatformTreasury: Caller is not the operator");
@@ -26,26 +26,26 @@ contract PlatformTreasury {
     // solhint-disable-next-line no-empty-blocks
     receive() external payable {}
 
-    function setOperator(address _op) external onlyOperator {
-        operator = _op;
+    function setOperator(address _operator) external onlyOperator {
+        operator = _operator;
     }
 
     function withdrawTo(
         IERC20 _token,
         uint256 _amountOut,
-        address _to
+        address _recipient
     ) external onlyOperator {
-        _token.safeTransfer(_to, _amountOut);
+        _token.safeTransfer(_recipient, _amountOut);
 
-        emit WithdrawTo(_to, _amountOut);
+        emit WithdrawTo(_recipient, _amountOut);
     }
 
     function execute(
-        address _to,
+        address _target,
         uint256 _value,
         bytes calldata _data
     ) external onlyOperator returns (bool, bytes memory) {
-        (bool success, bytes memory result) = _to.call{ value: _value }(_data);
+        (bool success, bytes memory result) = _target.call{ value: _value }(_data);
 
         return (success, result);
     }

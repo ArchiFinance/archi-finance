@@ -11,5 +11,7 @@ interface IDeposter {
         uint256 _minOut
     ) external payable returns (uint256);
 
-    function distributer() external view returns (address);
+    event Mint(address _token, uint256 _amountIn, uint256 _amountOut);
+    event Withdraw(address _token, uint256 _amountIn, uint256 _amountOut);
+    event Harvest(uint256 _rewards);
 }

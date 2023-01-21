@@ -85,48 +85,55 @@ contract CreditManager is Initializable, ReentrancyGuardUpgradeable, OwnableUpgr
 
     function harvest() public {
         address shareLocker = IAbstractVault(vault).creditManagersShareLocker(address(this));
-        uint256 claimed = IShareLocker(shareLocker).claim();
+        uint256 claimed = IShareLocker(shareLocker).harvest();
 
         accRewardPerShare = accRewardPerShare.add(claimed.mul(PRECISION).div(totalShares));
 
         emit Harvest(claimed, accRewardPerShare);
     }
 
-    function _updateRewards(address _for) internal {
-        User storage user = users[_for];
+    function _updateRewards(address _recipient) internal {
+        User storage user = users[_recipient];
 
-        uint256 rewards = _checkPoint(user);
+        uint256 rewards = _checkpoint(user);
 
         user.rewards = rewards;
         user.rewardPerSharePaid = accRewardPerShare;
     }
 
-    function claim() public nonReentrant returns (uint256 claimed) {
-        _updateRewards(msg.sender);
+    function claim(address _recipient) external override nonReentrant returns (uint256 claimed) {
+        _updateRewards(_recipient);
 
         address rewardPool = IAbstractVault(vault).borrowedRewardPool();
         address rewardToken = IAbstractReward(rewardPool).rewardToken();
 
-        User storage user = users[msg.sender];
+        User storage user = users[_recipient];
+
         claimed = user.rewards;
 
         if (claimed > 0) {
-            IERC20Upgradeable(rewardToken).safeTransfer(msg.sender, claimed);
+            IERC20Upgradeable(rewardToken).safeTransfer(_recipient, claimed);
 
-            emit Claim(msg.sender, claimed);
+            emit Claim(_recipient, claimed);
         }
 
         user.rewards = 0;
     }
 
-    function _checkPoint(User storage _user) internal view returns (uint256) {
+    function _checkpoint(User storage _user) internal view returns (uint256) {
         return _user.rewards.add(accRewardPerShare.sub(_user.rewardPerSharePaid).mul(_user.shares).div(PRECISION));
     }
 
-    function pendingRewards(address _for) public view returns (uint256) {
-        User storage user = users[_for];
+    function pendingRewards(address _recipient) public view returns (uint256) {
+        User storage user = users[_recipient];
 
-        return _checkPoint(user);
+        return _checkpoint(user);
+    }
+
+    function balanceOf(address _recipient) external view override returns (uint256) {
+        User storage user = users[_recipient];
+
+        return user.shares;
     }
 
     function _approve(

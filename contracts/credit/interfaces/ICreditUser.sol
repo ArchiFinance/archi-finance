@@ -3,6 +3,22 @@
 pragma solidity ^0.8.0;
 
 interface ICreditUser {
+    struct UserLendCredit {
+        address depositer;
+        address token;
+        uint256 amountIn;
+        address[] borrowedTokens;
+        uint256[] ratios;
+        bool terminated;
+    }
+
+    struct UserBorrowed {
+        address[] creditManagers;
+        uint256[] borrowedAmountOuts;
+        uint256 collateralMintedAmount;
+        uint256[] borrowedMintedAmount;
+    }
+    
     function accrueSnapshot(address _recipient) external returns (uint256);
 
     function createUserLendCredit(
@@ -15,7 +31,7 @@ interface ICreditUser {
         uint256[] calldata _ratios
     ) external;
 
-    function createUserBorroweds(
+    function createUserBorrowed(
         address _recipient,
         uint256 _borrowedIndex,
         address[] calldata _creditManagers,
@@ -64,7 +80,7 @@ interface ICreditUser {
         uint256[] _ratios
     );
 
-    event CreateUserBorroweds(
+    event CreateUserBorrowed(
         address indexed _recipient,
         uint256 _borrowedIndex,
         address[] _creditManagers,

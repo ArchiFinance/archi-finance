@@ -11,24 +11,7 @@ import { ICreditUser } from "./interfaces/ICreditUser.sol";
 contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     using SafeMathUpgradeable for uint256;
 
-    struct UserLendCredit {
-        address depositer;
-        address token;
-        uint256 amountIn;
-        address[] borrowedTokens;
-        uint256[] ratios;
-        bool terminated;
-    }
-
-    struct UserBorrowed {
-        address[] creditManagers;
-        uint256[] borrowedAmountOuts;
-        uint256 collateralMintedAmount;
-        uint256[] borrowedMintedAmount;
-    }
-
     address public caller;
-
     uint256 public lendCreditIndex;
 
     mapping(address => uint256) internal creditCounts;
@@ -84,7 +67,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         emit CreateUserLendCredit(_recipient, _borrowedIndex, _depositer, _token, _amountIn, _borrowedTokens, _ratios);
     }
 
-    function createUserBorroweds(
+    function createUserBorrowed(
         address _recipient,
         uint256 _borrowedIndex,
         address[] calldata _creditManagers,
@@ -101,7 +84,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
 
         userBorroweds[_recipient][_borrowedIndex] = userBorrowed;
 
-        emit CreateUserBorroweds(_recipient, _borrowedIndex, _creditManagers, _borrowedAmountOuts, _collateralMintedAmount, _borrowedMintedAmount);
+        emit CreateUserBorrowed(_recipient, _borrowedIndex, _creditManagers, _borrowedAmountOuts, _collateralMintedAmount, _borrowedMintedAmount);
     }
 
     function destroy(address _recipient, uint256 _borrowedIndex) external override onlyCaller {

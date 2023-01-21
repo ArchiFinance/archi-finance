@@ -67,7 +67,7 @@ contract DepositerRewardDistributor is Initializable, ReentrancyGuardUpgradeable
                 uint256 balance = IERC20Upgradeable(stakingToken).balanceOf(extraRewards[i]);
                 uint256 ratio = balance.mul(PRECISION).div(totalSupply);
                 uint256 amounts = _rewards.mul(ratio).div(PRECISION);
-
+    
                 _approve(rewardToken, extraRewards[i], amounts);
 
                 IAbstractReward(extraRewards[i]).distribute(amounts);
