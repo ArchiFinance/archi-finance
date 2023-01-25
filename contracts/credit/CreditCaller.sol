@@ -292,7 +292,7 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
         address _collateralReward,
         address[] calldata _vaults,
         address[] calldata _vaultRewards
-    ) external {
+    ) external onlyOwner {
         require(_vaults.length == _vaultRewards.length, "CreditCaller: Length mismatch");
 
         Strategy storage strategy = strategies[_depositer];
