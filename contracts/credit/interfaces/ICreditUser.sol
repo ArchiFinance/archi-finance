@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.4;
 
 interface ICreditUser {
     struct UserLendCredit {
-        address depositer;
+        address depositor;
         address token;
         uint256 amountIn;
         address[] borrowedTokens;
@@ -17,14 +17,15 @@ interface ICreditUser {
         uint256[] borrowedAmountOuts;
         uint256 collateralMintedAmount;
         uint256[] borrowedMintedAmount;
+        uint256 borrowedAt;
     }
-    
+
     function accrueSnapshot(address _recipient) external returns (uint256);
 
     function createUserLendCredit(
         address _recipient,
         uint256 _borrowedIndex,
-        address _depositer,
+        address _depositor,
         address _token,
         uint256 _amountIn,
         address[] calldata _borrowedTokens,
@@ -42,13 +43,19 @@ interface ICreditUser {
 
     function destroy(address _recipient, uint256 _borrowedIndex) external;
 
-    function isTerminated(address _user, uint256 _borrowedIndex) external view returns (bool);
+    function isTerminated(address _recipient, uint256 _borrowedIndex) external view returns (bool);
 
-    function getUserLendCredit(address _user, uint256 _borrowedIndex)
+    function isTimeout(
+        address _recipient,
+        uint256 _borrowedIndex,
+        uint256 _duration
+    ) external view returns (bool);
+
+    function getUserLendCredit(address _recipient, uint256 _borrowedIndex)
         external
         view
         returns (
-            address depositer,
+            address depositor,
             address token,
             uint256 amountIn,
             address[] memory borrowedTokens,
@@ -68,12 +75,12 @@ interface ICreditUser {
 
     function getUserCounts(address _recipient) external view returns (uint256);
 
-    function getLendCreditsUsers(uint256 _borrowedIndex) external view returns (address);
+    function getLendCreditUsers(uint256 _borrowedIndex) external view returns (address);
 
     event CreateUserLendCredit(
         address indexed _recipient,
         uint256 _borrowedIndex,
-        address _depositer,
+        address _depositor,
         address _token,
         uint256 _amountIn,
         address[] _borrowedTokens,
@@ -86,7 +93,8 @@ interface ICreditUser {
         address[] _creditManagers,
         uint256[] _borrowedAmountOuts,
         uint256 _collateralMintedAmount,
-        uint256[] _borrowedMintedAmount
+        uint256[] _borrowedMintedAmount,
+        uint256 _borrowedAt
     );
 
     event Destroy(address indexed _recipient, uint256 _borrowedIndex);

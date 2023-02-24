@@ -1,23 +1,26 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.4;
 
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import { SafeMathUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
 
 import { ICreditUser } from "./interfaces/ICreditUser.sol";
 
-contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
-    using SafeMathUpgradeable for uint256;
+/* 
+CreditUser is mainly used to record user's loan information, 
+and only provides query methods to the public.
+Interaction requires CreditCaller to call it.
+*/
 
+contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     address public caller;
     uint256 public lendCreditIndex;
 
     mapping(address => uint256) internal creditCounts;
+    mapping(uint256 => address) internal creditUsers;
     mapping(address => mapping(uint256 => UserLendCredit)) internal userLendCredits;
     mapping(address => mapping(uint256 => UserBorrowed)) internal userBorroweds;
-    mapping(uint256 => address) internal lendCreditsUsers;
 
     modifier onlyCaller() {
         require(caller == msg.sender, "CreditUser: Caller is not the caller");
@@ -28,27 +31,37 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     // solhint-disable-next-line no-empty-blocks
     constructor() initializer {}
 
-    // solhint-disable-next-line no-empty-blocks
-    receive() external payable {}
-
+    /// @notice used to initialize the contract
     function initialize(address _caller) external initializer {
         __ReentrancyGuard_init();
 
         caller = _caller;
     }
 
+    /// @notice update position index
+    /// @param _recipient borrower
     function accrueSnapshot(address _recipient) external override onlyCaller returns (uint256) {
+        require(_recipient != address(0), "CreditUser: _recipient cannot be 0x0");
+
         lendCreditIndex++;
-        lendCreditsUsers[lendCreditIndex] = _recipient;
         creditCounts[_recipient]++;
+        creditUsers[lendCreditIndex] = _recipient;
 
         return creditCounts[_recipient];
     }
 
+    /// @notice store requrest leverage info
+    /// @param _recipient borrower
+    /// @param _borrowedIndex position index
+    /// @param _depositor archi depositor
+    /// @param _token collateral token
+    /// @param _amountIn collateral amount
+    /// @param _borrowedTokens borrowed tokens
+    /// @param _ratios leverage ratio
     function createUserLendCredit(
         address _recipient,
         uint256 _borrowedIndex,
-        address _depositer,
+        address _depositor,
         address _token,
         uint256 _amountIn,
         address[] calldata _borrowedTokens,
@@ -56,7 +69,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     ) external override onlyCaller {
         UserLendCredit memory userLendCredit;
 
-        userLendCredit.depositer = _depositer;
+        userLendCredit.depositor = _depositor;
         userLendCredit.token = _token;
         userLendCredit.amountIn = _amountIn;
         userLendCredit.borrowedTokens = _borrowedTokens;
@@ -64,9 +77,16 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
 
         userLendCredits[_recipient][_borrowedIndex] = userLendCredit;
 
-        emit CreateUserLendCredit(_recipient, _borrowedIndex, _depositer, _token, _amountIn, _borrowedTokens, _ratios);
+        emit CreateUserLendCredit(_recipient, _borrowedIndex, _depositor, _token, _amountIn, _borrowedTokens, _ratios);
     }
 
+    /// @notice store user leverage info
+    /// @param _recipient borrower
+    /// @param _borrowedIndex position index
+    /// @param _creditManagers vault manager
+    /// @param _borrowedAmountOuts borrowed amount
+    /// @param _collateralMintedAmount collateral amount in GLP
+    /// @param _borrowedMintedAmount borrowed amount in GLP
     function createUserBorrowed(
         address _recipient,
         uint256 _borrowedIndex,
@@ -81,12 +101,24 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         userBorrowed.borrowedAmountOuts = _borrowedAmountOuts;
         userBorrowed.collateralMintedAmount = _collateralMintedAmount;
         userBorrowed.borrowedMintedAmount = _borrowedMintedAmount;
+        userBorrowed.borrowedAt = block.timestamp;
 
         userBorroweds[_recipient][_borrowedIndex] = userBorrowed;
 
-        emit CreateUserBorrowed(_recipient, _borrowedIndex, _creditManagers, _borrowedAmountOuts, _collateralMintedAmount, _borrowedMintedAmount);
+        emit CreateUserBorrowed(
+            _recipient,
+            _borrowedIndex,
+            _creditManagers,
+            _borrowedAmountOuts,
+            _collateralMintedAmount,
+            _borrowedMintedAmount,
+            userBorrowed.borrowedAt
+        );
     }
 
+    /// @notice terminate a leverage
+    /// @param _recipient borrower
+    /// @param _borrowedIndex position index
     function destroy(address _recipient, uint256 _borrowedIndex) external override onlyCaller {
         UserLendCredit storage userLendCredit = userLendCredits[_recipient][_borrowedIndex];
 
@@ -95,17 +127,43 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         emit Destroy(_recipient, _borrowedIndex);
     }
 
+    /// @notice if leverage is terminated
+    /// @param _recipient borrower
+    /// @param _borrowedIndex position index
+    /// @return bool value
     function isTerminated(address _recipient, uint256 _borrowedIndex) external view override returns (bool) {
         UserLendCredit storage userLendCredit = userLendCredits[_recipient][_borrowedIndex];
         return userLendCredit.terminated;
     }
 
+    /// @notice if leverage is overdue
+    /// @param _recipient borrower
+    /// @param _borrowedIndex position index
+    /// @param _duration maximum repay time
+    /// @return bool value
+    function isTimeout(
+        address _recipient,
+        uint256 _borrowedIndex,
+        uint256 _duration
+    ) external view override returns (bool) {
+        UserBorrowed storage userBorrowed = userBorroweds[_recipient][_borrowedIndex];
+        return block.timestamp - userBorrowed.borrowedAt > _duration;
+    }
+
+    /// @notice get open leverage info
+    /// @param _recipient borrower
+    /// @param _borrowedIndex position index
+    /// @return depositor archi depositor
+    /// @return token collateral token
+    /// @return amountIn collateral amount
+    /// @return borrowedTokens borrowed tokens
+    /// @return ratios leverage ratio
     function getUserLendCredit(address _recipient, uint256 _borrowedIndex)
         external
         view
         override
         returns (
-            address depositer,
+            address depositor,
             address token,
             uint256 amountIn,
             address[] memory borrowedTokens,
@@ -114,13 +172,20 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     {
         UserLendCredit storage userLendCredit = userLendCredits[_recipient][_borrowedIndex];
 
-        depositer = userLendCredit.depositer;
+        depositor = userLendCredit.depositor;
         token = userLendCredit.token;
         amountIn = userLendCredit.amountIn;
         borrowedTokens = userLendCredit.borrowedTokens;
         ratios = userLendCredit.ratios;
     }
 
+    /// @notice get leverage info
+    /// @param _recipient borrower
+    /// @param _borrowedIndex position index
+    /// @return creditManagers vault manager
+    /// @return borrowedAmountOuts borrowed amount
+    /// @return collateralMintedAmount collateral amount in GLP
+    /// @return borrowedMintedAmount borrowed amount in GLP
     function getUserBorrowed(address _recipient, uint256 _borrowedIndex)
         external
         view
@@ -136,10 +201,10 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         UserBorrowed storage userBorrowed = userBorroweds[_recipient][_borrowedIndex];
 
         for (uint256 i = 0; i < userBorrowed.borrowedMintedAmount.length; i++) {
-            mintedAmount = mintedAmount.add(userBorrowed.borrowedMintedAmount[i]);
+            mintedAmount = mintedAmount + userBorrowed.borrowedMintedAmount[i];
         }
 
-        mintedAmount = mintedAmount.add(userBorrowed.collateralMintedAmount);
+        mintedAmount = mintedAmount + userBorrowed.collateralMintedAmount;
 
         creditManagers = userBorrowed.creditManagers;
         borrowedAmountOuts = userBorrowed.borrowedAmountOuts;
@@ -147,11 +212,15 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         borrowedMintedAmount = userBorrowed.borrowedMintedAmount;
     }
 
+    /// @notice number of leverage
+    /// @param _recipient borrower
     function getUserCounts(address _recipient) external view override returns (uint256) {
         return creditCounts[_recipient];
     }
 
-    function getLendCreditsUsers(uint256 _borrowedIndex) external view override returns (address) {
-        return lendCreditsUsers[_borrowedIndex];
+    /// @notice get borrower from global borrow index
+    /// @param _borrowedIndex position index
+    function getLendCreditUsers(uint256 _borrowedIndex) external view override returns (address) {
+        return creditUsers[_borrowedIndex];
     }
 }

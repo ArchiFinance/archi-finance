@@ -1,53 +1,64 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.4;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 
 import { IAddressProvider } from "./interfaces/IAddressProvider.sol";
 
-bytes32 constant PRICE_ORACLE = "PRICE_ORACLE";
-bytes32 constant LIQUIDATER = "LIQUIDATER";
+bytes32 constant CREDIT_AGGREGATOR = "CREDIT_AGGREGATOR";
 bytes32 constant GMX_REWARD_ROUTER = "GMX_REWARD_ROUTER";
 bytes32 constant GMX_REWARD_ROUTER_V1 = "GMX_REWARD_ROUTER_V1";
 
+/* 
+The AddressProvider contract is mainly used to record the addresses of commonly used contracts for easy access by other contracts and to prevent incorrect address settings.
+*/
+
 contract AddressProvider is Ownable, IAddressProvider {
+    using Address for address;
+
     mapping(bytes32 => address) public addresses;
 
+    /// @notice used to initialize the contract
     constructor() {
         emit AddressSet("ADDRESS_PROVIDER", address(this));
     }
 
+    /// @notice get gmx reward router address
     function getGmxRewardRouter() external view override returns (address) {
         return _getAddress(GMX_REWARD_ROUTER);
     }
 
+    /// @notice set gmx gmx reward router address
     function setGmxRewardRouter(address _v) external onlyOwner {
+        require(_v != address(0), "AddressProvider: _v cannot be 0x0");
+
         _setAddress(GMX_REWARD_ROUTER, _v);
     }
 
+    /// @notice get gmx reward router v1 address
     function getGmxRewardRouterV1() external view override returns (address) {
         return _getAddress(GMX_REWARD_ROUTER_V1);
     }
 
+    /// @notice set gmx gmx reward router v1 address
     function setGmxRewardRouterV1(address _v) external onlyOwner {
+        require(_v != address(0), "AddressProvider: _v cannot be 0x0");
+
         _setAddress(GMX_REWARD_ROUTER_V1, _v);
     }
 
-    function getLiquidator() external view override returns (address) {
-        return _getAddress(LIQUIDATER);
+    /// @notice get archi aggregator address
+    function getCreditAggregator() external view override returns (address) {
+        return _getAddress(CREDIT_AGGREGATOR);
     }
 
-    function setLiquidater(address _v) external onlyOwner {
-        _setAddress(LIQUIDATER, _v);
-    }
+    ///@notice set archi aggregator address
+    function setCreditAggregator(address _v) external onlyOwner {
+        require(_v != address(0), "AddressProvider: _v cannot be 0x0");
 
-    function getPriceOracle() external view override returns (address) {
-        return _getAddress(PRICE_ORACLE);
-    }
-
-    function setPriceOracle(address _v) external onlyOwner {
-        _setAddress(PRICE_ORACLE, _v);
+        _setAddress(CREDIT_AGGREGATOR, _v);
     }
 
     /// @return Address of key, reverts if the key doesn't exist
@@ -63,5 +74,10 @@ contract AddressProvider is Ownable, IAddressProvider {
     function _setAddress(bytes32 _key, address _value) internal {
         addresses[_key] = _value;
         emit AddressSet(_key, _value);
+    }
+
+    /// @dev Rewriting methods to prevent accidental operations by the owner.
+    function renounceOwnership() public virtual override onlyOwner {
+        revert("AddressProvider: Not allowed");
     }
 }

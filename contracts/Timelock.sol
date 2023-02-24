@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
-
-import { SafeMath } from "@openzeppelin/contracts/utils/math/SafeMath.sol";
+pragma solidity =0.8.4;
 
 contract Timelock {
-    using SafeMath for uint256;
-
     event NewAdmin(address indexed _newAdmin);
     event NewPendingAdmin(address indexed _newPendingAdmin);
     event NewDelay(uint256 indexed _newDelay);
@@ -68,7 +64,7 @@ contract Timelock {
         uint256 _eta
     ) public returns (bytes32) {
         require(msg.sender == admin, "Timelock: Call must come from admin");
-        require(_eta >= block.timestamp.add(delay), "Timelock: Estimated execution block must satisfy delay");
+        require(_eta >= (block.timestamp + delay), "Timelock: Estimated execution block must satisfy delay");
 
         bytes32 txHash = keccak256(abi.encode(_target, _value, _signature, _data, _eta));
         queuedTransactions[txHash] = true;
@@ -116,7 +112,7 @@ contract Timelock {
 
         require(queuedTransactions[txHash], "Timelock: Transaction hasn't been queued");
         require(block.timestamp >= _eta, "Timelock: Transaction hasn't surpassed time lock");
-        require(block.timestamp <= _eta.add(GRACE_PERIOD), "Timelock: Transaction is stale");
+        require(block.timestamp <= (_eta + GRACE_PERIOD), "Timelock: Transaction is stale");
 
         queuedTransactions[txHash] = false;
 

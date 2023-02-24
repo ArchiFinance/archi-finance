@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.4;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -12,6 +12,8 @@ contract PlatformTreasury {
 
     address public operator;
 
+    error NotAuthorized();
+    error Failed(bytes _returnData);
     event WithdrawTo(address indexed _recipient, uint256 _amountOut);
 
     modifier onlyOperator() {
@@ -20,6 +22,8 @@ contract PlatformTreasury {
     }
 
     constructor(address _operator) {
+        require(_operator != address(0), "PlatformTreasury: _operator cannot be 0x0");
+
         operator = _operator;
     }
 
@@ -27,6 +31,8 @@ contract PlatformTreasury {
     receive() external payable {}
 
     function setOperator(address _operator) external onlyOperator {
+        require(_operator != address(0), "PlatformTreasury: _operator cannot be 0x0");
+
         operator = _operator;
     }
 
@@ -35,18 +41,21 @@ contract PlatformTreasury {
         uint256 _amountOut,
         address _recipient
     ) external onlyOperator {
+        require(address(_token) != address(0), "PlatformTreasury: _token cannot be 0x0");
+        require(_amountOut > 0, "PlatformTreasury: _amountIn cannot be 0");
+
         _token.safeTransfer(_recipient, _amountOut);
 
         emit WithdrawTo(_recipient, _amountOut);
     }
 
-    function execute(
-        address _target,
-        uint256 _value,
-        bytes calldata _data
-    ) external onlyOperator returns (bool, bytes memory) {
-        (bool success, bytes memory result) = _target.call{ value: _value }(_data);
+    function execute(address _target, bytes calldata _data) external payable onlyOperator returns (bytes memory) {
+        require(_target != address(0), "PlatformTreasury: _target cannot be 0x0");
 
-        return (success, result);
+        (bool success, bytes memory returnData) = _target.call{ value: msg.value }(_data);
+    
+        if (!success) revert Failed(returnData);
+
+        return returnData;
     }
 }

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.4;
 
 interface ICreditCaller {
     function openLendCredit(
-        address _depositer,
+        address _depositor,
         address _token,
         uint256 _amountIn,
         address[] calldata _borrowedTokens,
@@ -16,13 +16,23 @@ interface ICreditCaller {
 
     function liquidate(address _recipient, uint256 _borrowedIndex) external;
 
-    event LendCredit(address indexed _recipient, address _depositer, address _token, uint256 _amountIn, address[] _borrowedTokens, uint256[] _ratios);
-    event CalcBorrowAmount(address _borrowedToken, uint256 _borrowedAmountOuts, uint256 _borrowedMintedAmount);
-    event RepayCredit(address indexed _recipient, uint256 _borrowedIndex, uint256 _collateralAmountOut);
-    event Liquidate(address _recipient, uint256 _borrowedIndex, uint256 _health);
-    event AddStrategy(address _depositer, address _collateralReward, address[] _vaults, address[] _vaultRewards);
+    event LendCredit(
+        address indexed _recipient,
+        uint256 _borrowedIndex,
+        address _depositor,
+        address _token,
+        uint256 _amountIn,
+        address[] _borrowedTokens,
+        uint256[] _ratios,
+        uint256 _timestamp
+    );
+    event CalcBorrowAmount(address indexed _borrowedToken, uint256 _borrowedIndex, uint256 _borrowedAmountOuts, uint256 _borrowedMintedAmount);
+    event RepayCredit(address indexed _recipient, uint256 _borrowedIndex, address _collateralToken, uint256 _collateralAmountOut, uint256 _timestamp);
+    event RepayDebts(address indexed _recipient, uint256 _borrowedIndex, uint256 _amountOut, uint256 _borrowedAmountOut);
+    event Liquidate(address _recipient, uint256 _borrowedIndex, uint256 _health, uint256 _timestamp);
+    event LiquidatorFee(address _liquidator, uint256 _fee, uint256 _borrowedIndex);
+    event AddStrategy(address _depositor, address _collateralReward, address[] _vaults, address[] _vaultRewards);
     event AddVaultManager(address _underlying, address _creditManager);
     event SetCreditUser(address _creditUser);
-    event SetCreditToken(address _creditToken);
-    event SetTokenDecimals(address _underlyingToken, uint256 _decimals);
+    event SetCreditTokenStaker(address _creditTokenStaker);
 }

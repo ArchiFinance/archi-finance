@@ -4,6 +4,8 @@ coverage
 coverage.json
 typechain
 .DS_Store
+coverage.json
+coverage
 
 #Hardhat files
 cache
@@ -11,11 +13,8 @@ artifacts
 
 #Private files
 deployed*
-scripts
+scripts/verify.ts
 .vscode
-test
-hardhat.config.ts
-package.json
 package-lock.json
 .idea
 contracts/mocks/
