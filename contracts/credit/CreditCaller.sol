@@ -43,7 +43,7 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
     uint256 private constant MAX_SUM_RATIO = 10;
     uint256 private constant LIQUIDATE_THRESHOLD = 100; // 10%
     uint256 private constant LIQUIDATE_DENOMINATOR = 1000;
-    uint256 private constant LIQUIDATE_FEE = 10; // 1%
+    uint256 private constant LIQUIDATE_FEE = 100; // 10%
     uint256 private constant LIQUIDATE_PRECISION = 1000;
     uint256 private constant MAX_LOAN_DURATION = 1 days * 365;
 

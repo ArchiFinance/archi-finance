@@ -35,7 +35,7 @@ npm run coverage
 
 ## Useful Links
 
-Main website: [docs.archi.finance](https://docs.archi.finance/)
-Mainnet dApp: [app.archi.finance/passive](https://app.archi.finance/passive)
-Medium Blog: [medium.com/@archifinace](https://medium.com/@archifinace)
-Twitter: [twitter.com/archi_fi](https://twitter.com/archi_fi)
+* Main website: [docs.archi.finance](https://docs.archi.finance/)
+* Mainnet dApp: [app.archi.finance/passive](https://app.archi.finance/passive)
+* Medium Blog: [medium.com/@archifinace](https://medium.com/@archifinace)
+* Twitter: [twitter.com/archi_fi](https://twitter.com/archi_fi)
