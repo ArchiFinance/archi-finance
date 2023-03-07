@@ -156,7 +156,7 @@ const increaseDays = async (days?: number) => {
 
     return network.provider.request({
         method: "evm_increaseTime",
-        params: [1000 * 60 * 60 * 24 * days],
+        params: [60 * 60 * 24 * days],
     });
 }
 
@@ -165,7 +165,35 @@ const increaseMinutes = async (minutes?: number) => {
 
     return network.provider.request({
         method: "evm_increaseTime",
-        params: [1000 * 60 * minutes],
+        params: [60 * minutes],
+    });
+}
+
+const evmMine = async () => {
+    return network.provider.request({
+        method: "evm_mine",
+        params: [],
+    });
+}
+
+const evmRevert = async (snapshotId: string) => {
+    return network.provider.request({
+        method: "evm_revert",
+        params: [snapshotId],
+    });
+}
+
+const evmSnapshot = async () => {
+    return network.provider.request({
+        method: "evm_snapshot",
+        params: [],
+    });
+}
+
+const hardHatReset = async () => {
+    return network.provider.request({
+        method: "hardhat_reset",
+        params: [],
     });
 }
 
@@ -184,5 +212,9 @@ export {
     SimpleProxyCall,
     sleep,
     increaseDays,
-    increaseMinutes
+    increaseMinutes,
+    evmMine,
+    evmRevert,
+    evmSnapshot,
+    hardHatReset
 }

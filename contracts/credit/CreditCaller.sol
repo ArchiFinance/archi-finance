@@ -203,8 +203,10 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
         require(_borrowedIndex <= lastestIndex, "CreditCaller: Index out of range");
 
         bool isTerminated = ICreditUser(creditUser).isTerminated(msg.sender, _borrowedIndex);
-
         require(!isTerminated, "CreditCaller: Already terminated");
+
+        bool isTimeout = ICreditUser(creditUser).isTimeout(msg.sender, _borrowedIndex, MAX_LOAN_DURATION);
+        require(!isTimeout, "CreditCaller: Already timeout");
 
         return _repayCredit(msg.sender, _borrowedIndex, address(0));
     }

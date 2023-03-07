@@ -1,7 +1,7 @@
 /* eslint-disable node/no-missing-import */
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { increaseDays, removeDb } from "../scripts/utils";
+import { decreaseDays, evmRevert, evmSnapshot, increaseDays, removeDb } from "../scripts/utils";
 import { BigNumber } from "ethers";
 import { main as GMXDepositor } from "../scripts/modules/GMXDepositor";
 import { main as GMXExecutor } from "../scripts/modules/GMXExecutor";
@@ -108,9 +108,13 @@ describe("GMXDepositor contract", () => {
 
         expect(fsGLPBal).to.be.above(BigNumber.from("0"));
 
+        const snapshotId = (await evmSnapshot()) as string;
+
         await increaseDays(7);
         await depositor.harvest();
         await increaseDays(7);
+        await evmRevert(snapshotId);
+
         await depositor.setPlatform(ethers.constants.AddressZero);
         await depositor.harvest();
         await depositor.withdraw(weth.address, fsGLPBal, 0);

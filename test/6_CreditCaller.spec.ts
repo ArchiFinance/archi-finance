@@ -1,7 +1,7 @@
 /* eslint-disable node/no-missing-import */
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { db, increaseDays, increaseMinutes, removeDb, sleep, TOKENS } from "../scripts/utils";
+import { db, evmMine, increaseMinutes, removeDb, TOKENS } from "../scripts/utils";
 import { BigNumber } from "ethers";
 import { main as Base } from "../scripts/deploys/1_base";
 import { main as Vault } from "../scripts/deploys/2_vault";
@@ -140,9 +140,8 @@ describe("CreditCaller & CreditManager contract", () => {
         const creditRewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
 
         await creditRewardTracker.execute();
-
         await increaseMinutes(120);
-
+        await evmMine();
         await caller.liquidate(deployer.address, creditCounts);
         await caller.repayCredit(creditCounts);
 
