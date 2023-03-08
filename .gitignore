@@ -17,4 +17,3 @@ scripts/verify.ts
 .vscode
 package-lock.json
 .idea
-contracts/mocks/
