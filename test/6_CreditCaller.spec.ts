@@ -1,7 +1,7 @@
 /* eslint-disable node/no-missing-import */
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { db, evmMine, increaseMinutes, removeDb, TOKENS } from "../scripts/utils";
+import { db, evmMine, evmRevert, evmSnapshot, increaseDays, increaseMinutes, removeDb, TOKENS } from "../scripts/utils";
 import { BigNumber } from "ethers";
 import { main as Base } from "../scripts/deploys/1_base";
 import { main as Vault } from "../scripts/deploys/2_vault";
@@ -140,10 +140,38 @@ describe("CreditCaller & CreditManager contract", () => {
         const creditRewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
 
         await creditRewardTracker.execute();
+
+        let snapshotId = (await evmSnapshot()) as string;
         await increaseMinutes(120);
         await evmMine();
+        await evmRevert(snapshotId);
+
         await caller.liquidate(deployer.address, creditCounts);
+
+        snapshotId = (await evmSnapshot()) as string;
+        await increaseDays(365);
+        await evmMine();
+        try {
+            await caller.repayCredit(creditCounts);
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditCaller: Already timeout/);
+        }
+
+        await evmRevert(snapshotId);
+
         await caller.repayCredit(creditCounts);
+        expect(caller.repayCredit(creditCounts)).to.be.revertedWith("CreditCaller: Already terminated");
+
+        snapshotId = (await evmSnapshot()) as string;
+        await increaseDays(365);
+        await evmMine();
+        await caller.liquidate(deployer.address, creditCounts.sub(1));
+        try {
+            await caller.liquidate(deployer.address, creditCounts.sub(1));
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditCaller: Already terminated/);
+        }
+        await evmRevert(snapshotId);
 
         const manager = await ethers.getContractAt("CreditManager", db.get("WETHVaultManagerProxy").logic, deployer);
 
@@ -165,14 +193,19 @@ describe("CreditCaller & CreditManager contract", () => {
         const depositor = await Depositor.deploy();
         const instance = await depositor.deployed();
 
-        const data = instance.interface.encodeFunctionData("initialize", [db.get("CreditCallerProxy").logic, TOKENS.WETH, db.get("CreditRewardTrackerProxy").logic, deployer.address]);
+        const data = instance.interface.encodeFunctionData("initialize", [
+            db.get("CreditCallerProxy").logic,
+            TOKENS.WETH,
+            db.get("CreditRewardTrackerProxy").logic,
+            deployer.address,
+        ]);
         const proxy = await TransparentUpgradeableProxy.deploy(instance.address, proxyAdmin.address, data);
 
         const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
 
-        expect(caller.openLendCredit(proxy.address, ZERO, collateralAmountIn, [TOKENS.WETH], [200], deployer.address, { value: collateralAmountIn })).to.be.revertedWith(
-            "CreditCaller: Mismatched strategy"
-        );
+        expect(
+            caller.openLendCredit(proxy.address, ZERO, collateralAmountIn, [TOKENS.WETH], [200], deployer.address, { value: collateralAmountIn })
+        ).to.be.revertedWith("CreditCaller: Mismatched strategy");
     });
 
     it("Test #calcHealth", async () => {
@@ -215,17 +248,9 @@ describe("CreditCaller & CreditManager contract", () => {
 
         const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
 
-        expect(caller.addVaultManager(ethers.constants.AddressZero, db.get("WETHVaultManagerProxy").logic)).to.be.revertedWith("CreditCaller: _underlyingToken cannot be 0x0");
-        expect(caller.addVaultManager(TOKENS.WETH, ethers.constants.AddressZero)).to.be.revertedWith("CreditCaller: _creditManager cannot be 0x0");
-        expect(caller.addVaultManager(TOKENS.WETH, db.get("WETHVaultManagerProxy").logic)).to.be.revertedWith("CreditCaller: Not allowed");
-    });
-
-    it("Test #addVaultManager", async () => {
-        const [deployer] = await ethers.getSigners();
-
-        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
-
-        expect(caller.addVaultManager(ethers.constants.AddressZero, db.get("WETHVaultManagerProxy").logic)).to.be.revertedWith("CreditCaller: _underlyingToken cannot be 0x0");
+        expect(caller.addVaultManager(ethers.constants.AddressZero, db.get("WETHVaultManagerProxy").logic)).to.be.revertedWith(
+            "CreditCaller: _underlyingToken cannot be 0x0"
+        );
         expect(caller.addVaultManager(TOKENS.WETH, ethers.constants.AddressZero)).to.be.revertedWith("CreditCaller: _creditManager cannot be 0x0");
         expect(caller.addVaultManager(TOKENS.WETH, db.get("WETHVaultManagerProxy").logic)).to.be.revertedWith("CreditCaller: Not allowed");
     });

@@ -1,7 +1,7 @@
 /* eslint-disable node/no-missing-import */
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { evmRevert, evmSnapshot, increaseDays, removeDb } from "../scripts/utils";
+import { evmMine, evmRevert, evmSnapshot, increaseDays, removeDb } from "../scripts/utils";
 import { BigNumber } from "ethers";
 import { main as GMXExecutor } from "../scripts/modules/GMXExecutor";
 import { loadFixture } from "ethereum-waffle";
@@ -112,6 +112,7 @@ describe("GMXExecutor contract", () => {
 
         const snapshotId = (await evmSnapshot()) as string;
         await increaseDays(7);
+        await evmMine();
         await evmRevert(snapshotId);
 
         await simpleProxy.execute(executor.address, executor.interface.encodeFunctionData("claimRewards"));
