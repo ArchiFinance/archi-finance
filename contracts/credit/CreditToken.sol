@@ -25,6 +25,8 @@ contract CreditToken is ERC20, ICreditToken {
     constructor(address _operator, address _baseToken)
         ERC20(string(abi.encodePacked(ERC20(_baseToken).name(), " credit token")), string(abi.encodePacked("ct", ERC20(_baseToken).symbol())))
     {
+        require(_operator != address(0), "CreditToken: _operator cannot be 0x0");
+
         operator = _operator;
     }
 
