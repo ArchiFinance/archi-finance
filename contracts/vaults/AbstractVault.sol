@@ -121,7 +121,7 @@ abstract contract AbstractVault is
     /// @notice borrowed from vault
     /// @param _borrowedAmount amount been borrowed
     /// @return borrowed amount
-    function borrow(uint256 _borrowedAmount) external override onlyCreditManagersCanBorrow(msg.sender) returns (uint256) {
+    function borrow(uint256 _borrowedAmount) external override whenNotPaused onlyCreditManagersCanBorrow(msg.sender) returns (uint256) {
         IERC20Upgradeable(underlyingToken).safeTransfer(msg.sender, _borrowedAmount);
 
         address shareLocker = creditManagersShareLocker[msg.sender];
