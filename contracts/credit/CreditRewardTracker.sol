@@ -16,10 +16,14 @@ It can be used to call the harvest method, and only authorized governance person
 contract CreditRewardTracker is Initializable {
     using AddressUpgradeable for address;
 
+    uint256 private constant MAX_DEPOSITOR_SIZE = 8;
+    uint256 private constant MAX_MANAGER_SIZE = 12;
+
     address public owner;
     address public pendingOwner;
-    uint256 public lastInteractedAt;
     uint256 public duration;
+
+    uint256[2] public lastInteractedAt;
 
     address[] public managers;
     address[] public depositors;
@@ -112,6 +116,7 @@ contract CreditRewardTracker is Initializable {
     /// @param _manager CreditManager address
     function addManager(address _manager) public onlyOwner {
         require(_manager != address(0), "CreditRewardTracker: _manager cannot be 0x0");
+        require(managers.length < MAX_MANAGER_SIZE, "CreditRewardTracker: Maximum limit exceeded");
 
         for (uint256 i = 0; i < managers.length; i++) {
             require(managers[i] != _manager, "CreditRewardTracker: Duplicate _manager");
@@ -133,6 +138,7 @@ contract CreditRewardTracker is Initializable {
     /// @param _depositor depositor address
     function addDepositor(address _depositor) public onlyOwner {
         require(_depositor != address(0), "CreditRewardTracker: _depositor cannot be 0x0");
+        require(depositors.length < MAX_DEPOSITOR_SIZE, "CreditRewardTracker: Maximum limit exceeded");
 
         for (uint256 i = 0; i < depositors.length; i++) {
             require(depositors[i] != _depositor, "CreditRewardTracker: Duplicate _depositor");
@@ -156,22 +162,29 @@ contract CreditRewardTracker is Initializable {
         duration = _duration;
     }
 
-    /// @notice execute harvest in managers depositors
-    function execute() external onlyGovernors {
-        require(block.timestamp - lastInteractedAt >= duration, "CreditRewardTracker: Incorrect duration");
+    /// @notice execute harvest in managers
+    function harvestDepositors() external onlyGovernors {
+        require(block.timestamp - lastInteractedAt[0] >= duration, "CreditRewardTracker: Incorrect duration");
 
-        lastInteractedAt = block.timestamp;
+        lastInteractedAt[0] = block.timestamp;
 
         for (uint256 i = 0; i < depositors.length; i++) {
             uint256 claimed = IDepositor(depositors[i]).harvest();
 
-            emit Executed(msg.sender, depositors[i], claimed, lastInteractedAt);
+            emit Executed(msg.sender, depositors[i], claimed, lastInteractedAt[0]);
         }
+    }
+
+    /// @notice execute harvest in depositors
+    function harvestManagers() external onlyGovernors {
+        require(block.timestamp - lastInteractedAt[1] >= duration, "CreditRewardTracker: Incorrect duration");
+
+        lastInteractedAt[1] = block.timestamp;
 
         for (uint256 i = 0; i < managers.length; i++) {
             uint256 claimed = ICreditManager(managers[i]).harvest();
 
-            emit Executed(msg.sender, managers[i], claimed, lastInteractedAt);
+            emit Executed(msg.sender, managers[i], claimed, lastInteractedAt[1]);
         }
     }
 
