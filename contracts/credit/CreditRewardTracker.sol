@@ -64,6 +64,8 @@ contract CreditRewardTracker is Initializable {
 
     /// @notice accept owner
     function acceptOwner() external onlyOwner {
+        require(pendingOwner != address(0), "CreditRewardTracker: pendingOwner cannot be 0x0");
+
         owner = pendingOwner;
 
         pendingOwner = address(0);
