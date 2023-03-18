@@ -19,6 +19,7 @@ contract CreditTokenStaker is Initializable, ICreditTokenStaker {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     address public override creditToken;
+    uint256 public totalOwners;
 
     mapping(address => bool) private owners;
 
@@ -36,6 +37,7 @@ contract CreditTokenStaker is Initializable, ICreditTokenStaker {
         require(_owner != address(0), "CreditTokenStaker: _owner cannot be 0x0");
 
         owners[_owner] = true;
+        totalOwners++;
     }
 
     /// @notice add owner
@@ -45,6 +47,7 @@ contract CreditTokenStaker is Initializable, ICreditTokenStaker {
         require(!isOwner(_newOwner), "CreditTokenStaker: _newOwner is already owner");
 
         owners[_newOwner] = true;
+        totalOwners++;
 
         emit NewOwner(msg.sender, _newOwner);
     }
@@ -62,8 +65,10 @@ contract CreditTokenStaker is Initializable, ICreditTokenStaker {
     function removeOwner(address _owner) external onlyOwners {
         require(_owner != address(0), "CreditTokenStaker: _owner cannot be 0x0");
         require(isOwner(_owner), "CreditTokenStaker: _owner is not an owner");
+        require(totalOwners > 1, "CreditTokenStaker: totalOwners must be greater than 1");
 
         owners[_owner] = false;
+        totalOwners--;
 
         emit RemoveOwner(msg.sender, _owner);
     }
