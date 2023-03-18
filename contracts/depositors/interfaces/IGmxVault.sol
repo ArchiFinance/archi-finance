@@ -38,4 +38,8 @@ interface IGmxVault {
         address _tokenDiv,
         address _tokenMul
     ) external view returns (uint256);
+
+    function taxBasisPoints() external view returns (uint256);
+
+    function mintBurnFeeBasisPoints() external view returns (uint256);
 }

@@ -26,8 +26,6 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     address private constant ZERO = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     uint256 private constant GMX_DIVISION_LOSS_COMPENSATION = 10000; // 0.01 %
     uint256 private constant BASIS_POINTS_DIVISOR = 10000;
-    uint256 private constant MINT_BURN_FEE_BASIS_POINTS = 25;
-    uint256 private constant TAX_BASIS_POINTS = 50;
     uint8 private constant GLP_DECIMALS = 18;
     uint8 private constant USDG_DECIMALS = 18;
     uint8 private constant PRICE_DECIMALS = 30;
@@ -126,7 +124,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
         glpAmount = adjustForDecimals(glpAmount, tokenDecimals, GLP_DECIMALS);
         usdgAmount = adjustForDecimals(usdgAmount, tokenDecimals, USDG_DECIMALS);
 
-        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_fromToken, usdgAmount, MINT_BURN_FEE_BASIS_POINTS, TAX_BASIS_POINTS, true);
+        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_fromToken, usdgAmount, _mintBurnFeeBasisPoints(), _taxBasisPoints(), true);
 
         glpAmount = glpAmount.mul(BASIS_POINTS_DIVISOR - feeBasisPoints).div(BASIS_POINTS_DIVISOR);
 
@@ -152,7 +150,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
         glpAmount = adjustForDecimals(glpAmount, tokenDecimals, GLP_DECIMALS);
         usdgAmount = adjustForDecimals(usdgAmount, tokenDecimals, USDG_DECIMALS);
 
-        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_fromToken, usdgAmount, MINT_BURN_FEE_BASIS_POINTS, TAX_BASIS_POINTS, false);
+        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_fromToken, usdgAmount, _mintBurnFeeBasisPoints(), _taxBasisPoints(), false);
 
         glpAmount = glpAmount.mul(BASIS_POINTS_DIVISOR).div(BASIS_POINTS_DIVISOR - feeBasisPoints);
         glpAmount = glpAmount.add(glpAmount.div(GMX_DIVISION_LOSS_COMPENSATION));
@@ -178,7 +176,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
         tokenAmountOut = adjustForDecimals(tokenAmountOut, GLP_DECIMALS, tokenDecimals);
 
         uint256 usdgAmount = _glpAmountIn.mul(glpPrice).div(10**PRICE_DECIMALS);
-        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_toToken, usdgAmount, MINT_BURN_FEE_BASIS_POINTS, TAX_BASIS_POINTS, true);
+        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_toToken, usdgAmount, _mintBurnFeeBasisPoints(), _taxBasisPoints(), true);
 
         tokenAmountOut = tokenAmountOut.mul(BASIS_POINTS_DIVISOR).div(BASIS_POINTS_DIVISOR - feeBasisPoints);
 
@@ -202,7 +200,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
         tokenAmountOut = adjustForDecimals(tokenAmountOut, GLP_DECIMALS, tokenDecimals);
 
         uint256 usdgAmount = _glpAmountIn.mul(glpPrice).div(10**PRICE_DECIMALS);
-        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_toToken, usdgAmount, MINT_BURN_FEE_BASIS_POINTS, TAX_BASIS_POINTS, false);
+        uint256 feeBasisPoints = IGmxVault(vault).getFeeBasisPoints(_toToken, usdgAmount, _mintBurnFeeBasisPoints(), _taxBasisPoints(), false);
 
         tokenAmountOut = tokenAmountOut.mul(BASIS_POINTS_DIVISOR - feeBasisPoints).div(BASIS_POINTS_DIVISOR);
 
@@ -259,6 +257,16 @@ contract CreditAggregator is Initializable, ICreditAggregator {
         return IERC20Upgradeable(_token).totalSupply();
     }
 
+    /// @notice Get the result of GMX taxBasisPoints function
+    function _taxBasisPoints() internal view returns(uint256) {
+        return IGmxVault(vault).taxBasisPoints();
+    }
+    
+    /// @notice Get the result of GMX mintBurnFeeBasisPoints function
+    function _mintBurnFeeBasisPoints() internal view returns(uint256) {
+        return IGmxVault(vault).mintBurnFeeBasisPoints();
+    }
+
     /// @notice get token price
     /// @param _token address
     /// @return calculate average price based on getMaxPrice & getMinPrice
@@ -296,13 +304,21 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     /// @param _token token address
     /// @return get GMX vault getMaxPrice
     function getMaxPrice(address _token) public view returns (uint256) {
-        return IGmxVault(vault).getMaxPrice(_token);
+        uint256 price = IGmxVault(vault).getMaxPrice(_token);
+
+        require(price > 0, "CreditAggregator: GMX oracle encounters problems");
+
+        return price;
     }
 
     /// @notice get token min price
     /// @param _token token address
     /// @return get GMX vault getMinPrice
     function getMinPrice(address _token) public view returns (uint256) {
-        return IGmxVault(vault).getMinPrice(_token);
+        uint256 price = IGmxVault(vault).getMinPrice(_token);
+
+        require(price > 0, "CreditAggregator: GMX oracle encounters problems");
+
+        return price;
     }
 }
