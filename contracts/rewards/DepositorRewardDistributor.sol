@@ -132,6 +132,13 @@ contract DepositorRewardDistributor is Initializable, ReentrancyGuardUpgradeable
         return distributors[_distributor];
     }
 
+    /// @notice Get the total supply of extra reward contract
+    function _stakingTokenSupply() internal view returns (uint256 totalSupply) {
+        for (uint256 i = 0; i < extraRewards.length; i++) {
+            totalSupply += IERC20Upgradeable(stakingToken).balanceOf(extraRewards[i]);
+        }
+    }
+
     /// @notice reward distribution
     /// @dev the distribution function will transfer from the caller to rewards
     /// @param _rewards reward amount
@@ -142,7 +149,7 @@ contract DepositorRewardDistributor is Initializable, ReentrancyGuardUpgradeable
 
         _rewards = IERC20Upgradeable(rewardToken).balanceOf(address(this));
 
-        uint256 totalSupply = IERC20Upgradeable(stakingToken).totalSupply();
+        uint256 totalSupply = _stakingTokenSupply();
 
         if (totalSupply > 0) {
             for (uint256 i = 0; i < extraRewards.length; i++) {
