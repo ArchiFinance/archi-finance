@@ -26,6 +26,6 @@ interface IAbstractVault {
     event SetSupplyRewardPool(address _rewardPool);
     event SetBorrowedRewardPool(address _rewardPool);
     event AddCreditManager(address _creditManager, address _shareLocker);
-    event ForbidCreditManagersCanRepay(address _creditManager);
-    event ForbidCreditManagerToBorrow(address _creditManager);
+    event ToggleCreditManagerToBorrow(address _creditManager, bool _oldState);
+    event ToggleCreditManagersCanRepay(address _creditManager, bool _oldState);
 }

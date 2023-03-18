@@ -198,22 +198,30 @@ abstract contract AbstractVault is
         emit AddCreditManager(_creditManager, shareLocker);
     }
 
-    /// @notice forbid credit manager to borrow
+    /// @notice toggle credit manager to borrow
     /// @param _creditManager credit manager address
-    function forbidCreditManagerToBorrow(address _creditManager) external onlyOwner {
+    function toggleCreditManagerToBorrow(address _creditManager) external onlyOwner {
         require(_creditManager != address(0), "AbstractVault: _creditManager cannot be 0x0");
-        creditManagersCanBorrow[_creditManager] = false;
+        require(creditManagersShareLocker[_creditManager] != address(0), "AbstractVault: _creditManager has not been added yet");
 
-        emit ForbidCreditManagerToBorrow(_creditManager);
+        bool oldState = creditManagersCanBorrow[_creditManager];
+
+        creditManagersCanBorrow[_creditManager] = !oldState;
+
+        emit ToggleCreditManagerToBorrow(_creditManager, oldState);
     }
 
-    /// @notice forbid credit manager to repay
+    /// @notice toggle credit manager to repay
     /// @param _creditManager credit manager address
-    function forbidCreditManagersCanRepay(address _creditManager) external onlyOwner {
+    function toggleCreditManagersCanRepay(address _creditManager) external onlyOwner {
         require(_creditManager != address(0), "AbstractVault: _creditManager cannot be 0x0");
-        creditManagersCanRepay[_creditManager] = false;
+        require(creditManagersShareLocker[_creditManager] != address(0), "AbstractVault: _creditManager has not been added yet");
 
-        emit ForbidCreditManagersCanRepay(_creditManager);
+        bool oldState = creditManagersCanRepay[_creditManager];
+
+        creditManagersCanRepay[_creditManager] = !oldState;
+
+        emit ToggleCreditManagersCanRepay(_creditManager, oldState);
     }
 
     /// @notice pause vault to add liquidity
