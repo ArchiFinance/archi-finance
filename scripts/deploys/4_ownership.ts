@@ -33,9 +33,8 @@ async function main() {
     // const WBTCVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("WBTCVaultManagerProxy").logic, deployer);
     // const WBTCVaultRewardDistributorProxy = await ethers.getContractAt("VaultRewardDistributor", db.get("WBTCVaultRewardDistributorProxy").logic, deployer);
 
-    // const DAIVaultProxy = await ethers.getContractAt("ERC20Vault", db.get("DAIVaultProxy").logic, deployer);
-    // const DAIVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("DAIVaultManagerProxy").logic, deployer);
-    // const DAIVaultRewardDistributorProxy = await ethers.getContractAt("VaultRewardDistributor", db.get("DAIVaultRewardDistributorProxy").logic, deployer);
+    const DAIVaultProxy = await ethers.getContractAt("ERC20Vault", db.get("DAIVaultProxy").logic, deployer);
+    const DAIVaultRewardDistributorProxy = await ethers.getContractAt("VaultRewardDistributor", db.get("DAIVaultRewardDistributorProxy").logic, deployer);
 
     // const FRAXVaultProxy = await ethers.getContractAt("ERC20Vault", db.get("FRAXVaultProxy").logic, deployer);
     // const FRAXVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("FRAXVaultManagerProxy").logic, deployer);
@@ -63,8 +62,8 @@ async function main() {
     // await waitTx([await WBTCVaultProxy.transferOwnership(simpleProxy.address)]);
     // await waitTx([await WBTCVaultRewardDistributorProxy.transferOwnership(simpleProxy.address)]);
 
-    // await waitTx([await DAIVaultProxy.transferOwnership(simpleProxy.address)]);
-    // await waitTx([await DAIVaultRewardDistributorProxy.transferOwnership(simpleProxy.address)]);
+    await waitTx([await DAIVaultProxy.transferOwnership(simpleProxy.address)]);
+    await waitTx([await DAIVaultRewardDistributorProxy.transferOwnership(simpleProxy.address)]);
 
     // await waitTx([await FRAXVaultProxy.transferOwnership(simpleProxy.address)]);
     // await waitTx([await FRAXVaultRewardDistributorProxy.transferOwnership(simpleProxy.address)]);

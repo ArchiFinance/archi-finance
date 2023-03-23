@@ -41,11 +41,14 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
     uint256 private constant MAX_RATIO = 1000; // max ratio is 10
     uint256 private constant RATIO_PRECISION = 100;
     uint256 private constant MAX_SUM_RATIO = 10;
-    uint256 private constant LIQUIDATE_THRESHOLD = 100; // 10%
-    uint256 private constant LIQUIDATE_DENOMINATOR = 1000;
-    uint256 private constant LIQUIDATE_FEE = 100; // 10%
+    uint256 private constant MAX_LIQUIDATE_THRESHOLD = 500; // 50%
+    uint256 private constant MIN_LIQUIDATE_THRESHOLD = 300; // 30%
+    uint256 private constant MAX_LIQUIDATOR_FEE = 200; // 20%
+    uint256 private constant MIN_LIQUIDATOR_FEE = 50; // 5%
     uint256 private constant LIQUIDATE_PRECISION = 1000;
+    uint256 private constant LIQUIDATOR_FEE_PRECISION = 1000;
     uint256 private constant MAX_LOAN_DURATION = 1 days * 365;
+    uint256 private constant NEXT_LOAN_PERIOD = 2 days;
 
     struct Strategy {
         bool listed;
@@ -58,6 +61,9 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
     address public creditUser;
     address public creditTokenStaker;
     address public allowlist;
+
+    uint256 public liquidateThreshold;
+    uint256 public liquidatorFee;
 
     mapping(address => Strategy) public strategies; // depositor => Strategy
     mapping(address => address) public vaultManagers; // borrow token => manager
@@ -79,6 +85,8 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
 
         addressProvider = _addressProvider;
         wethAddress = _wethAddress;
+        liquidateThreshold = 400; // 40%
+        liquidatorFee = 100; // 10%
     }
 
     /// @notice open position
@@ -103,10 +111,19 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
 
         require(_borrowedTokens.length == _ratios.length, "CreditCaller: Length mismatch");
 
-        if (allowlist != address(0)) {
-            bool allowed = IAllowlist(allowlist).can(_recipient);
+        // Check if the user has used the authority to call the function.
+        {
+            bool passed;
 
-            require(allowed, "CreditCaller: Not whitelisted");
+            if (allowlist != address(0)) {
+                passed = IAllowlist(allowlist).can(_recipient);
+
+                require(passed, "CreditCaller: Not whitelisted");
+            }
+
+            passed = ICreditUser(creditUser).hasPassedSinceLastTerminated(_recipient, NEXT_LOAN_PERIOD);
+
+            require(passed, "CreditCaller: The next loan period is invalid");
         }
 
         if (_token == ZERO) {
@@ -119,11 +136,20 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
             _amountIn = IERC20MetadataUpgradeable(_token).balanceOf(address(this)) - before;
         }
 
+        require(vaultManagers[_token] != address(0), "CreditCaller: The collateral asset must be one of the borrow tokens");
+
+        uint256 reservedLiquidatorFee = (_amountIn * liquidatorFee) / LIQUIDATOR_FEE_PRECISION;
+
+        IERC20MetadataUpgradeable(_token).safeTransfer(creditUser, reservedLiquidatorFee);
+
+        _amountIn = _amountIn - reservedLiquidatorFee;
+
         ICreditUser.UserLendCredit memory userLendCredit;
 
         userLendCredit.depositor = _depositor;
         userLendCredit.token = _token;
         userLendCredit.amountIn = _amountIn;
+        userLendCredit.reservedLiquidatorFee = reservedLiquidatorFee;
         userLendCredit.borrowedTokens = _borrowedTokens;
         userLendCredit.ratios = _ratios;
 
@@ -147,6 +173,7 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
             _userLendCredit.depositor,
             _userLendCredit.token,
             _userLendCredit.amountIn,
+            _userLendCredit.reservedLiquidatorFee,
             _userLendCredit.borrowedTokens,
             _userLendCredit.ratios
         );
@@ -219,7 +246,7 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
         ICreditUser.UserLendCredit memory userLendCredit;
         ICreditUser.UserBorrowed memory userBorrowed;
 
-        (userLendCredit.depositor, userLendCredit.token, , userLendCredit.borrowedTokens, ) = ICreditUser(creditUser).getUserLendCredit(
+        (userLendCredit.depositor, userLendCredit.token, , , userLendCredit.borrowedTokens, ) = ICreditUser(creditUser).getUserLendCredit(
             _recipient,
             _borrowedIndex
         );
@@ -236,75 +263,73 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
 
         Strategy storage strategy = strategies[userLendCredit.depositor];
 
-        for (uint256 i = 0; i < userBorrowed.creditManagers.length; i++) {
-            (uint256 usedMintedAmount, uint256 amountOut) = _withdrawBorrowedAmount(
-                userLendCredit.depositor,
-                userLendCredit.borrowedTokens[i],
-                userBorrowed.borrowedAmountOuts[i]
-            );
+        address aggregator = IAddressProvider(addressProvider).getCreditAggregator();
 
-            uint256 repayAmountIn = userBorrowed.borrowedAmountOuts[i];
+        (uint256 totalRepayMintedAmounts, uint256[] memory repayMintedAmounts) = ICreditAggregator(aggregator).getSellGlpFromAmounts(
+            userLendCredit.borrowedTokens,
+            userBorrowed.borrowedAmountOuts
+        );
 
-            if (_liquidator == address(0)) {
-                require(amountOut >= repayAmountIn, "CreditCaller: Insufficient balance");
+        if (_liquidator == address(0)) {
+            if (totalMintedAmount < totalRepayMintedAmounts) {
+                revert("CreditCaller: The current position needs to be liquidated");
             } else {
-                if (amountOut < repayAmountIn) {
-                    emit RepayDebts(_recipient, _borrowedIndex, amountOut, repayAmountIn);
+                for (uint256 i = 0; i < userBorrowed.creditManagers.length; i++) {
+                    uint256 borrowedAmountOut = IDepositor(userLendCredit.depositor).withdraw(userLendCredit.borrowedTokens[i], repayMintedAmounts[i], 0);
 
-                    repayAmountIn = amountOut;
+                    require(borrowedAmountOut >= userBorrowed.borrowedAmountOuts[i], "CreditCaller: Insufficient balance");
+
+                    _approve(userLendCredit.borrowedTokens[i], userBorrowed.creditManagers[i], userBorrowed.borrowedAmountOuts[i]);
+
+                    ICreditManager(userBorrowed.creditManagers[i]).repay(_recipient, userBorrowed.borrowedAmountOuts[i], 0, false);
+
+                    address vaultRewardDistributor = strategy.vaultReward[ICreditManager(userBorrowed.creditManagers[i]).vault()];
+
+                    ICreditTokenStaker(creditTokenStaker).withdraw(vaultRewardDistributor, userBorrowed.borrowedMintedAmount[i]);
+
+                    totalMintedAmount = totalMintedAmount - repayMintedAmounts[i];
                 }
             }
+        } else {
+            for (uint256 i = 0; i < userBorrowed.creditManagers.length; i++) {
+                address vaultRewardDistributor = strategy.vaultReward[ICreditManager(userBorrowed.creditManagers[i]).vault()];
 
-            _approve(userLendCredit.borrowedTokens[i], userBorrowed.creditManagers[i], repayAmountIn);
-            ICreditManager(userBorrowed.creditManagers[i]).repay(_recipient, repayAmountIn);
+                ICreditTokenStaker(creditTokenStaker).withdraw(vaultRewardDistributor, userBorrowed.borrowedMintedAmount[i]);
 
-            if (totalMintedAmount >= usedMintedAmount) {
-                totalMintedAmount = totalMintedAmount - usedMintedAmount;
-            } else {
-                /* 
-                Occurs only at extreme cases. 
-                In this case, traders wins by a large margin and liquidation bot has little time to react. 
-                IL has occured and pay back as much as possible to the supply pool while set borrowers collateral asset to 0. 
-                */
-                totalMintedAmount = 0;
+                if (totalMintedAmount == 0) {
+                    ICreditManager(userBorrowed.creditManagers[i]).repay(_recipient, userBorrowed.borrowedAmountOuts[i], 0, true);
+                    continue;
+                }
+
+                uint256 repayAmountDuringLiquidation;
+
+                if (repayMintedAmounts[i] >= totalMintedAmount) {
+                    repayAmountDuringLiquidation = IDepositor(userLendCredit.depositor).withdraw(userLendCredit.borrowedTokens[i], totalMintedAmount, 0);
+                    totalMintedAmount = 0;
+                } else {
+                    repayAmountDuringLiquidation = IDepositor(userLendCredit.depositor).withdraw(userLendCredit.borrowedTokens[i], repayMintedAmounts[i], 0);
+                    totalMintedAmount = totalMintedAmount - repayMintedAmounts[i];
+                }
+
+                _approve(userLendCredit.borrowedTokens[i], userBorrowed.creditManagers[i], repayAmountDuringLiquidation);
+                ICreditManager(userBorrowed.creditManagers[i]).repay(_recipient, userBorrowed.borrowedAmountOuts[i], repayAmountDuringLiquidation, true);
             }
 
-            address vaultRewardDistributor = strategy.vaultReward[ICreditManager(userBorrowed.creditManagers[i]).vault()];
-
-            ICreditTokenStaker(creditTokenStaker).withdraw(vaultRewardDistributor, userBorrowed.borrowedMintedAmount[i]);
+            emit LiquidatorFee(_liquidator, userLendCredit.reservedLiquidatorFee, _borrowedIndex);
         }
 
         if (totalMintedAmount > 0) {
             collateralAmountOut = IDepositor(userLendCredit.depositor).withdraw(userLendCredit.token, totalMintedAmount, 0);
 
-            if (_liquidator != address(0)) {
-                uint256 liquidatorFee = (collateralAmountOut * LIQUIDATE_FEE) / LIQUIDATE_PRECISION;
-                collateralAmountOut = collateralAmountOut - liquidatorFee;
-                IERC20MetadataUpgradeable(userLendCredit.token).safeTransfer(_liquidator, liquidatorFee);
-
-                emit LiquidatorFee(_liquidator, liquidatorFee, _borrowedIndex);
-            }
-
             IERC20MetadataUpgradeable(userLendCredit.token).safeTransfer(_recipient, collateralAmountOut);
         }
 
         ICreditTokenStaker(creditTokenStaker).withdrawFor(strategy.collateralReward, _recipient, userBorrowed.collateralMintedAmount);
-        ICreditUser(creditUser).destroy(_recipient, _borrowedIndex);
+        ICreditUser(creditUser).destroy(_recipient, _borrowedIndex, _liquidator);
 
         emit RepayCredit(_recipient, _borrowedIndex, userLendCredit.token, collateralAmountOut, block.timestamp);
 
         return collateralAmountOut;
-    }
-
-    function _withdrawBorrowedAmount(
-        address _depositor,
-        address _borrowedTokens,
-        uint256 _borrowedAmountOuts
-    ) internal returns (uint256, uint256) {
-        uint256 usedMintedAmount = _sellGlpFromAmount(_borrowedTokens, _borrowedAmountOuts);
-        uint256 amountOut = IDepositor(_depositor).withdraw(_borrowedTokens, usedMintedAmount, 0);
-
-        return (usedMintedAmount, amountOut);
     }
 
     /// @notice liquidate position
@@ -323,7 +348,7 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
 
         uint256 health = getUserCreditHealth(_recipient, _borrowedIndex);
 
-        if (health <= LIQUIDATE_THRESHOLD || isTimeout) {
+        if (health <= liquidateThreshold || isTimeout) {
             _repayCredit(_recipient, _borrowedIndex, msg.sender);
 
             emit Liquidate(_recipient, _borrowedIndex, health, block.timestamp);
@@ -334,18 +359,16 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
     /// @param _recipient borrower
     /// @param _borrowedIndex position index
     function getUserCreditHealth(address _recipient, uint256 _borrowedIndex) public view returns (uint256) {
-        (, , , address[] memory borrowedTokens, ) = ICreditUser(creditUser).getUserLendCredit(_recipient, _borrowedIndex);
-        (address[] memory creditManagers, uint256[] memory borrowedAmountOuts, uint256 collateralMintedAmount, , uint256 totalMintedAmount) = ICreditUser(
-            creditUser
-        ).getUserBorrowed(_recipient, _borrowedIndex);
+        (, , , , address[] memory borrowedTokens, ) = ICreditUser(creditUser).getUserLendCredit(_recipient, _borrowedIndex);
+        (, uint256[] memory borrowedAmountOuts, uint256 collateralMintedAmount, , uint256 totalMintedAmount) = ICreditUser(creditUser).getUserBorrowed(
+            _recipient,
+            _borrowedIndex
+        );
 
-        uint256 borrowedMinted;
+        address aggregator = IAddressProvider(addressProvider).getCreditAggregator();
+        (uint256 totalRepayMintedAmounts, ) = ICreditAggregator(aggregator).getSellGlpFromAmounts(borrowedTokens, borrowedAmountOuts);
 
-        for (uint256 i = 0; i < creditManagers.length; i++) {
-            borrowedMinted = borrowedMinted + _sellGlpFromAmount(borrowedTokens[i], borrowedAmountOuts[i]);
-        }
-
-        return calcHealth(totalMintedAmount, borrowedMinted, collateralMintedAmount);
+        return calcHealth(totalMintedAmount, totalRepayMintedAmounts, collateralMintedAmount);
     }
 
     /// @notice add strategy
@@ -414,6 +437,26 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
         allowlist = _allowlist;
     }
 
+    /// @notice Set the threshold for liquidation
+    function setLiquidateThreshold(uint256 _threshold) external onlyOwner {
+        require(_threshold <= MAX_LIQUIDATE_THRESHOLD, "CreditCaller: MAX_LIQUIDATE_THRESHOLD limit exceeded");
+        require(_threshold >= MIN_LIQUIDATE_THRESHOLD, "CreditCaller: MIN_LIQUIDATE_THRESHOLD limit exceeded");
+
+        liquidateThreshold = _threshold;
+
+        emit SetLiquidateThreshold(_threshold);
+    }
+
+    /// @notice Set the threshold for liquidation
+    function setLiquidatorFee(uint256 _fee) external onlyOwner {
+        require(_fee <= MAX_LIQUIDATOR_FEE, "CreditCaller: MAX_LIQUIDATOR_FEE limit exceeded");
+        require(_fee >= MIN_LIQUIDATOR_FEE, "CreditCaller: MIN_LIQUIDATOR_FEE limit exceeded");
+
+        liquidatorFee = _fee;
+
+        emit SetLiquidatorFee(_fee);
+    }
+
     /// @notice shortcut function helper, help user to claim fast
     /// @param _target target contract address
     /// @param _recipient user
@@ -465,7 +508,7 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
     ) public pure returns (uint256) {
         if (_totalAmounts < _borrowedAmounts) return 0;
 
-        return ((_totalAmounts - _borrowedAmounts) * LIQUIDATE_DENOMINATOR) / _collateralAmounts;
+        return ((_totalAmounts - _borrowedAmounts) * LIQUIDATE_PRECISION) / _collateralAmounts;
     }
 
     function _approve(
@@ -495,18 +538,6 @@ contract CreditCaller is Initializable, ReentrancyGuardUpgradeable, OwnableUpgra
         address aggregator = IAddressProvider(addressProvider).getCreditAggregator();
 
         return ICreditAggregator(aggregator).getTokenPrice(_token);
-    }
-
-    /// @notice calculate required GLP for amountIn
-    /// @param _swapToken token address
-    /// @param _amountIn token amount
-    /// @return glp GLP amount
-    function _sellGlpFromAmount(address _swapToken, uint256 _amountIn) internal view returns (uint256) {
-        address aggregator = IAddressProvider(addressProvider).getCreditAggregator();
-
-        (uint256 amountOut, ) = ICreditAggregator(aggregator).getSellGlpFromAmount(_swapToken, _amountIn);
-
-        return amountOut;
     }
 
     /// @notice wrapped ETH

@@ -8,13 +8,17 @@ describe("CreditToken contract", () => {
     const amountIn = ethers.utils.parseEther("100");
     let creditToken: CreditTokenInterface;
 
-    beforeEach(async () => {
+    before(async () => {
         const [deployer] = await ethers.getSigners();
 
         const fsGLP = `0x1addd80e6039594ee970e5872d247bf0414c8903`;
 
-        const CreditToken = await ethers.getContractFactory("CreditToken", deployer);
-        creditToken = await (await CreditToken.deploy(deployer.address, fsGLP)).deployed();
+        const CreditTokenFactory = await ethers.getContractFactory("CreditToken", deployer);
+        const CreditToken = await CreditTokenFactory.deploy(deployer.address, fsGLP);
+
+        creditToken = await CreditToken.deployed();
+
+        expect(CreditTokenFactory.deploy(ethers.constants.AddressZero, fsGLP)).to.be.revertedWith("CreditToken: _operator cannot be 0x0");
     });
 
     after(async () => {
@@ -37,8 +41,6 @@ describe("CreditToken contract", () => {
     it("Test modifiers", async () => {
         const [deployer, wrongSigner] = await ethers.getSigners();
 
-        const newCreditToken = await creditToken.connect(wrongSigner);
-
-        expect(newCreditToken.mint(deployer.address, amountIn)).to.be.revertedWith("CreditToken: Caller is not the operator");
+        expect(creditToken.connect(wrongSigner).mint(deployer.address, amountIn)).to.be.revertedWith("CreditToken: Caller is not the operator");
     });
 });

@@ -6,6 +6,7 @@ import { BigNumber } from "ethers";
 import { main as ETHVault } from "../scripts/modules/ETHVault";
 import { main as ERC20Vault } from "../scripts/modules/ERC20Vault";
 import { main as BaseReward } from "../scripts/modules/BaseReward";
+import { main as CreditRewardTracker } from "../scripts/modules/CreditRewardTracker";
 import { main as SimpleProxy } from "../scripts/modules/SimpleProxy";
 import { loadFixture } from "ethereum-waffle";
 import { ERC20Vault as ERC20VaultInterface, ETHVault as ETHVaultInterface, MockToken, WETH9 } from "../typechain";
@@ -64,6 +65,19 @@ describe("Vaults contract", () => {
 
         await weth.approve(ethVault.address, ethers.constants.MaxUint256);
         await usdt.approve(usdtVault.address, ethers.constants.MaxUint256);
+
+        const creditRewardTracker = await CreditRewardTracker(proxyAdmin.address, deployer.address);
+
+        await creditRewardTracker.toggleVaultCanExecute(ethVault.address);
+        await creditRewardTracker.toggleVaultCanExecute(usdtVault.address);
+        await creditRewardTracker.toggleVaultCanExecute(errorVault.address);
+
+        await ethVault.setRewardTracker(creditRewardTracker.address);
+        await usdtVault.setRewardTracker(creditRewardTracker.address);
+        await errorVault.setRewardTracker(creditRewardTracker.address);
+
+        expect(ethVault.setRewardTracker(ethers.constants.AddressZero)).to.be.revertedWith("AbstractVault: _tracker cannot be 0x0");
+        expect(ethVault.setRewardTracker(creditRewardTracker.address)).to.be.revertedWith("AbstractVault: Cannot run this function twice");
     });
 
     it("Test initialize", async () => {
@@ -142,7 +156,7 @@ describe("Vaults contract", () => {
         expect(await usdt.balanceOf(usdtVault.address)).to.be.equal(BigNumber.from("0"));
     });
 
-    it("Test #addCreditManager", async () => {
+    it("Test #addCreditManager #toggleCreditManagerToBorrow #toggleCreditManagersCanRepay", async () => {
         const [deployer] = await ethers.getSigners();
         const simpleProxy1 = await SimpleProxy(deployer.address);
 
@@ -150,15 +164,24 @@ describe("Vaults contract", () => {
         expect(usdtVault.addCreditManager(deployer.address)).to.be.revertedWith("AbstractVault: _creditManager is not a contract");
 
         await usdtVault.addCreditManager(simpleProxy1.address);
-        await usdtVault.forbidCreditManagerToBorrow(simpleProxy1.address);
+        await usdtVault.toggleCreditManagerToBorrow(simpleProxy1.address);
         expect(usdtVault.addCreditManager(simpleProxy1.address)).to.be.revertedWith("AbstractVault: Not allowed");
 
         const simpleProxy2 = await SimpleProxy(deployer.address);
         await usdtVault.addCreditManager(simpleProxy2.address);
-        await usdtVault.forbidCreditManagersCanRepay(simpleProxy2.address);
+        await usdtVault.toggleCreditManagersCanRepay(simpleProxy2.address);
         expect(usdtVault.addCreditManager(simpleProxy2.address)).to.be.revertedWith("AbstractVault: Not allowed");
-        await usdtVault.forbidCreditManagerToBorrow(simpleProxy2.address);
+        await usdtVault.toggleCreditManagerToBorrow(simpleProxy2.address);
         expect(usdtVault.addCreditManager(simpleProxy2.address)).to.be.revertedWith("AbstractVault: Not allowed");
+
+        expect(usdtVault.toggleCreditManagerToBorrow(ethers.constants.AddressZero)).to.be.revertedWith("AbstractVault: _creditManager cannot be 0x0");
+        expect(usdtVault.toggleCreditManagersCanRepay(ethers.constants.AddressZero)).to.be.revertedWith("AbstractVault: _creditManager cannot be 0x0");
+
+        expect(usdtVault.toggleCreditManagerToBorrow(deployer.address)).to.be.revertedWith("AbstractVault: _creditManager has not been added yet");
+        expect(usdtVault.toggleCreditManagersCanRepay(deployer.address)).to.be.revertedWith("AbstractVault: _creditManager has not been added yet");
+
+        await usdtVault.toggleCreditManagerToBorrow(simpleProxy1.address);
+        await usdtVault.toggleCreditManagersCanRepay(simpleProxy1.address);
     });
 
     it("Test #borrow #repay", async () => {
@@ -183,27 +206,19 @@ describe("Vaults contract", () => {
         expect(await usdt.balanceOf(usdtVault.address)).to.be.eql(BigNumber.from(usdtBorrowedAmountIn));
 
         // repay
-        await simpleProxy.execute(usdtVault.address, usdtVault.interface.encodeFunctionData("repay", [usdtBorrowedAmountIn]));
+        await simpleProxy.execute(usdtVault.address, usdtVault.interface.encodeFunctionData("repay", [usdtBorrowedAmountIn.div(2), 0, false]));
+        await simpleProxy.execute(
+            usdtVault.address,
+            usdtVault.interface.encodeFunctionData("repay", [usdtBorrowedAmountIn.div(2), usdtBorrowedAmountIn.div(2), true])
+        );
         expect(await usdt.balanceOf(usdtVault.address)).to.be.eql(BigNumber.from(usdtAmountIn));
     });
 
     it("Test #creditManagersCount", async () => {
-        const [deployer] = await ethers.getSigners();
-
         await usdtVault.creditManagersCount();
     });
 
-    it("Test #forbidCreditManagerToBorrow/#forbidCreditManagersCanRepay", async () => {
-        const [deployer] = await ethers.getSigners();
-
-        expect(usdtVault.forbidCreditManagerToBorrow(ethers.constants.AddressZero)).to.be.revertedWith("AbstractVault: _creditManager cannot be 0x0");
-        expect(usdtVault.forbidCreditManagersCanRepay(ethers.constants.AddressZero)).to.be.revertedWith("AbstractVault: _creditManager cannot be 0x0");
-
-        await usdtVault.forbidCreditManagerToBorrow(deployer.address);
-        await usdtVault.forbidCreditManagersCanRepay(deployer.address);
-    });
-
-    it("Test #pause/#unpause", async () => {
+    it("Test #pause #unpause", async () => {
         await usdtVault.pause();
         await usdtVault.unpause();
     });
@@ -226,14 +241,11 @@ describe("Vaults contract", () => {
     });
 
     it("Test modifiers", async () => {
-        const [deployer, wrongSigner] = await ethers.getSigners();
-
         const borrowAmount = ethers.utils.parseUnits("100", 6);
         await weth.deposit({ value: borrowAmount });
         await weth.approve(ethVault.address, borrowAmount);
 
-        // const newVault = await ethVault.connect(wrongSigner);
         expect(ethVault.borrow(borrowAmount)).to.be.revertedWith("AbstractVault: Caller is not the vault manager");
-        expect(ethVault.repay(borrowAmount)).to.be.revertedWith("AbstractVault: Caller is not the vault manager");
+        expect(ethVault.repay(borrowAmount, 0, false)).to.be.revertedWith("AbstractVault: Caller is not the vault manager");
     });
 });

@@ -1,7 +1,7 @@
 /* eslint-disable node/no-missing-import */
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { evmMine, evmRevert, evmSnapshot, increaseDays, removeDb } from "../scripts/utils";
+import { evmMine, evmSnapshotRun, increaseDays, removeDb } from "../scripts/utils";
 import { BigNumber } from "ethers";
 import { main as GMXExecutor } from "../scripts/modules/GMXExecutor";
 import { loadFixture } from "ethereum-waffle";
@@ -110,13 +110,12 @@ describe("GMXExecutor contract", () => {
 
         expect(fsGLPBal).to.be.above(BigNumber.from("0"));
 
-        const snapshotId = (await evmSnapshot()) as string;
-        await increaseDays(7);
-        await evmMine();
-        await evmRevert(snapshotId);
-
-        await simpleProxy.execute(executor.address, executor.interface.encodeFunctionData("claimRewards"));
-        await simpleProxy.execute(executor.address, executor.interface.encodeFunctionData("withdraw", [weth.address, fsGLPBal, 0]));
+        await evmSnapshotRun(async () => {
+            await increaseDays(7);
+            await evmMine();
+            await simpleProxy.execute(executor.address, executor.interface.encodeFunctionData("claimRewards"));
+            await simpleProxy.execute(executor.address, executor.interface.encodeFunctionData("withdraw", [weth.address, fsGLPBal, 0]));
+        });
     });
 
     it("Test modifiers", async () => {

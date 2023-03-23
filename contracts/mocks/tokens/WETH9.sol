@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.4;
 
 contract WETH9 {
     uint256 private MAX_INT = 2**256 - 1;

@@ -11,12 +11,14 @@ async function main() {
     const WETHVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("WETHVaultManagerProxy").logic, deployer);
     const USDTVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("USDTVaultManagerProxy").logic, deployer);
     const USDCVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("USDCVaultManagerProxy").logic, deployer);
+    const DAIVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("DAIVaultManagerProxy").logic, deployer);
 
     await waitTx([
         await CreditRewardTracker.addDepositor(GMXDepositor.address),
         await CreditRewardTracker.addManager(WETHVaultManagerProxy.address),
         await CreditRewardTracker.addManager(USDTVaultManagerProxy.address),
         await CreditRewardTracker.addManager(USDCVaultManagerProxy.address),
+        await CreditRewardTracker.addManager(DAIVaultManagerProxy.address),
     ]);
 }
 

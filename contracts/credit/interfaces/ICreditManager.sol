@@ -7,7 +7,12 @@ interface ICreditManager {
 
     function borrow(address _recipient, uint256 _borrowedAmount) external;
 
-    function repay(address _recipient, uint256 _borrowedAmount) external;
+    function repay(
+        address _recipient,
+        uint256 _borrowedAmount,
+        uint256 _repayAmountDuringLiquidation,
+        bool _liquidating
+    ) external;
 
     function claim(address _recipient) external returns (uint256 claimed);
 
@@ -16,7 +21,7 @@ interface ICreditManager {
     function harvest() external returns (uint256);
 
     event Borrow(address _recipient, uint256 _borrowedAmount, uint256 _totalShares, uint256 _shares);
-    event Repay(address _recipient, uint256 _borrowedAmount, uint256 _totalShares, uint256 _shares);
+    event Repay(address _recipient, uint256 _borrowedAmount, uint256 _repayAmountDuringLiquidation, bool _liquidating, uint256 _totalShares, uint256 _shares);
     event Harvest(uint256 _claimed, uint256 _accRewardPerShare);
     event Claim(address _recipient, uint256 _claimed);
 }

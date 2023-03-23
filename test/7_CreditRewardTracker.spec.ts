@@ -9,7 +9,7 @@ import { loadFixture } from "ethereum-waffle";
 import { deployProxyAdmin } from "./LoadFixture";
 
 describe("CreditRewardTracker contract", () => {
-    beforeEach(async () => {
+    before(async () => {
         await Base();
         await Vault();
         await Initial();
@@ -37,16 +37,13 @@ describe("CreditRewardTracker contract", () => {
         ).to.be.revertedWith("CreditRewardTracker: _owner cannot be 0x0");
     });
 
-    it("Test #execute", async () => {
+    it("Test #harvestDepositors #harvestManagers", async () => {
         const [deployer] = await ethers.getSigners();
 
         const rewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
-        await rewardTracker.execute();
 
-        expect(rewardTracker.execute()).to.be.revertedWith("CreditRewardTracker: Incorrect duration");
-
-        await rewardTracker.setDuration(0);
-        await rewardTracker.execute();
+        await rewardTracker.harvestDepositors();
+        await rewardTracker.harvestManagers();
     });
 
     it("Test #setPendingOwner", async () => {
@@ -55,26 +52,21 @@ describe("CreditRewardTracker contract", () => {
         const rewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
 
         expect(rewardTracker.setPendingOwner(ethers.constants.AddressZero)).to.be.revertedWith("CreditRewardTracker: _owner cannot be 0x0");
+        expect(rewardTracker.acceptOwner()).to.be.revertedWith("CreditRewardTracker: pendingOwner cannot be 0x0");
 
         await rewardTracker.setPendingOwner(deployer.address);
         await rewardTracker.acceptOwner();
     });
 
-    it("Test #addGovernor #addGovernors #removeGovernor", async () => {
-        const [deployer, test1Signer, test2Signer] = await ethers.getSigners();
+    it("Test #toggleVaultCanExecute #execute", async () => {
+        const [deployer] = await ethers.getSigners();
 
         const rewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
 
-        expect(rewardTracker.addGovernor(ethers.constants.AddressZero)).to.be.revertedWith("CreditRewardTracker: _newGovernor cannot be 0x0");
+        expect(rewardTracker.toggleVaultCanExecute(ethers.constants.AddressZero)).to.be.revertedWith("CreditRewardTracker: _vault cannot be 0x0");
 
-        await rewardTracker.addGovernor(test1Signer.address);
-        await rewardTracker.addGovernors([test2Signer.address]);
-
-        expect(rewardTracker.addGovernor(test2Signer.address)).to.be.revertedWith("CreditRewardTracker: _newGovernor is already governor");
-
-        expect(rewardTracker.removeGovernor(ethers.constants.AddressZero)).to.be.revertedWith("CreditRewardTracker: _governor cannot be 0x0");
-        await rewardTracker.removeGovernor(test2Signer.address);
-        expect(rewardTracker.removeGovernor(test2Signer.address)).to.be.revertedWith("CreditRewardTracker: _governor is not a governor");
+        await rewardTracker.toggleVaultCanExecute(deployer.address);
+        await rewardTracker.execute();
     });
 
     it("Test #addManager #addDepositor", async () => {
@@ -91,6 +83,33 @@ describe("CreditRewardTracker contract", () => {
 
         expect(rewardTracker.addDepositor(ethers.constants.AddressZero)).to.be.revertedWith("CreditRewardTracker: _depositor cannot be 0x0");
         expect(rewardTracker.addDepositor(prevDepositor)).to.be.revertedWith("CreditRewardTracker: Duplicate _depositor");
+
+        const MAX_DEPOSITOR_SIZE = 8;
+        const MAX_MANAGER_SIZE = 12;
+
+        const managersLength = await rewardTracker.managersLength();
+
+        for (let i = managersLength.toNumber(); i <= MAX_MANAGER_SIZE; i++) {
+            const wallet = ethers.Wallet.createRandom().connect(ethers.provider);
+
+            if (i === MAX_MANAGER_SIZE) {
+                expect(rewardTracker.addManager(wallet.address)).to.be.revertedWith("CreditRewardTracker: Maximum limit exceeded");
+            } else {
+                await rewardTracker.addManager(wallet.address);
+            }
+        }
+
+        const depositorsLength = await rewardTracker.depositorsLength();
+
+        for (let i = depositorsLength.toNumber(); i <= MAX_DEPOSITOR_SIZE; i++) {
+            const wallet = ethers.Wallet.createRandom().connect(ethers.provider);
+
+            if (i === MAX_DEPOSITOR_SIZE) {
+                expect(rewardTracker.addDepositor(wallet.address)).to.be.revertedWith("CreditRewardTracker: Maximum limit exceeded");
+            } else {
+                await rewardTracker.addDepositor(wallet.address);
+            }
+        }
     });
 
     it("Test #removeManager #removeDepositor", async () => {
@@ -113,6 +132,6 @@ describe("CreditRewardTracker contract", () => {
         const rewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, wrongSigner);
 
         expect(rewardTracker.setPendingOwner(deployer.address)).to.be.revertedWith("NotAuthorized()");
-        expect(rewardTracker.execute()).to.be.revertedWith("NotAuthorized()");
+        expect(rewardTracker.execute()).to.be.revertedWith("CreditRewardTracker: Not allowed");
     });
 });

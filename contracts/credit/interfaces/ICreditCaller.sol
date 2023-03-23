@@ -35,4 +35,6 @@ interface ICreditCaller {
     event AddVaultManager(address _underlying, address _creditManager);
     event SetCreditUser(address _creditUser);
     event SetCreditTokenStaker(address _creditTokenStaker);
+    event SetLiquidateThreshold(uint256 _threshold);
+    event SetLiquidatorFee(uint256 _fee);
 }

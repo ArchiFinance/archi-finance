@@ -4,6 +4,8 @@ pragma solidity =0.8.4;
 
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import { IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import { SafeERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 import { ICreditUser } from "./interfaces/ICreditUser.sol";
 
@@ -14,6 +16,8 @@ Interaction requires CreditCaller to call it.
 */
 
 contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+
     address public caller;
     uint256 public lendCreditIndex;
 
@@ -21,6 +25,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     mapping(uint256 => address) internal creditUsers;
     mapping(address => mapping(uint256 => UserLendCredit)) internal userLendCredits;
     mapping(address => mapping(uint256 => UserBorrowed)) internal userBorroweds;
+    mapping(address => uint256) internal userLastTerminated;
 
     modifier onlyCaller() {
         require(caller == msg.sender, "CreditUser: Caller is not the caller");
@@ -64,6 +69,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         address _depositor,
         address _token,
         uint256 _amountIn,
+        uint256 _reservedLiquidatorFee,
         address[] calldata _borrowedTokens,
         uint256[] calldata _ratios
     ) external override onlyCaller {
@@ -72,6 +78,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         userLendCredit.depositor = _depositor;
         userLendCredit.token = _token;
         userLendCredit.amountIn = _amountIn;
+        userLendCredit.reservedLiquidatorFee = _reservedLiquidatorFee;
         userLendCredit.borrowedTokens = _borrowedTokens;
         userLendCredit.ratios = _ratios;
 
@@ -119,12 +126,34 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     /// @notice terminate a leverage
     /// @param _recipient borrower
     /// @param _borrowedIndex position index
-    function destroy(address _recipient, uint256 _borrowedIndex) external override onlyCaller {
+    function destroy(
+        address _recipient,
+        uint256 _borrowedIndex,
+        address _liquidator
+    ) external override onlyCaller {
         UserLendCredit storage userLendCredit = userLendCredits[_recipient][_borrowedIndex];
 
         userLendCredit.terminated = true;
 
+        userLastTerminated[_recipient] = block.timestamp;
+
+        if (userLendCredit.reservedLiquidatorFee > 0) {
+            if (_liquidator == address(0)) {
+                IERC20Upgradeable(userLendCredit.token).safeTransfer(_recipient, userLendCredit.reservedLiquidatorFee);
+            } else {
+                IERC20Upgradeable(userLendCredit.token).safeTransfer(_liquidator, userLendCredit.reservedLiquidatorFee);
+            }
+        }
+
         emit Destroy(_recipient, _borrowedIndex);
+    }
+
+     /// @notice determine the end time of the previous leverage
+    /// @param _recipient borrower
+    /// @param _duration position index
+    /// @return bool value
+    function hasPassedSinceLastTerminated(address _recipient, uint256 _duration) external view override returns (bool) {
+        return block.timestamp - userLastTerminated[_recipient] > _duration;
     }
 
     /// @notice if leverage is terminated
@@ -156,6 +185,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
     /// @return depositor archi depositor
     /// @return token collateral token
     /// @return amountIn collateral amount
+    /// @return reservedLiquidatorFee retain liquidator fees, which will be refunded if not incurred
     /// @return borrowedTokens borrowed tokens
     /// @return ratios leverage ratio
     function getUserLendCredit(address _recipient, uint256 _borrowedIndex)
@@ -166,6 +196,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
             address depositor,
             address token,
             uint256 amountIn,
+            uint256 reservedLiquidatorFee,
             address[] memory borrowedTokens,
             uint256[] memory ratios
         )
@@ -175,6 +206,7 @@ contract CreditUser is Initializable, ReentrancyGuardUpgradeable, ICreditUser {
         depositor = userLendCredit.depositor;
         token = userLendCredit.token;
         amountIn = userLendCredit.amountIn;
+        reservedLiquidatorFee = userLendCredit.reservedLiquidatorFee;
         borrowedTokens = userLendCredit.borrowedTokens;
         ratios = userLendCredit.ratios;
     }

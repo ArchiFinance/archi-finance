@@ -15,6 +15,7 @@ import { Multicall } from "../libraries/Multicall.sol";
 import { IAbstractVault } from "./interfaces/IAbstractVault.sol";
 import { IShareLocker, ShareLocker } from "./ShareLocker.sol";
 import { IBaseReward } from "../rewards/interfaces/IBaseReward.sol";
+import { IRewardTracker } from "../interfaces/IRewardTracker.sol";
 
 /* 
 The AbstractVault is a liquidity deposit contract that inherits from the ERC20 contract. 
@@ -39,6 +40,8 @@ abstract contract AbstractVault is
     address public override underlyingToken;
     address public override supplyRewardPool;
     address public override borrowedRewardPool;
+
+    IRewardTracker public rewardTracker;
 
     address[] public creditManagers;
 
@@ -85,6 +88,8 @@ abstract contract AbstractVault is
     function addLiquidity(uint256 _amountIn) external payable whenNotPaused returns (uint256) {
         require(_amountIn > 0, "AbstractVault: _amountIn cannot be 0");
 
+        rewardTracker.execute();
+
         _amountIn = _addLiquidity(_amountIn);
 
         _mint(address(this), _amountIn);
@@ -104,6 +109,8 @@ abstract contract AbstractVault is
     /// @param _amountOut amount of liquidity
     function removeLiquidity(uint256 _amountOut) external {
         require(_amountOut > 0, "AbstractVault: _amountOut cannot be 0");
+
+        rewardTracker.execute();
 
         uint256 vsTokenBal = balanceOf(msg.sender);
 
@@ -138,8 +145,19 @@ abstract contract AbstractVault is
 
     /// @notice repay vault
     /// @param _borrowedAmount repaid amount
-    function repay(uint256 _borrowedAmount) external override onlyCreditManagersCanRepay(msg.sender) {
-        IERC20Upgradeable(underlyingToken).safeTransferFrom(msg.sender, address(this), _borrowedAmount);
+    /// @param _repayAmountDuringLiquidation the actual amount that can be repaid when the user undergoes liquidation
+    function repay(
+        uint256 _borrowedAmount,
+        uint256 _repayAmountDuringLiquidation,
+        bool _liquidating
+    ) external override onlyCreditManagersCanRepay(msg.sender) {
+        if (_liquidating) {
+            if (_repayAmountDuringLiquidation > 0) {
+                IERC20Upgradeable(underlyingToken).safeTransferFrom(msg.sender, address(this), _repayAmountDuringLiquidation);
+            }
+        } else {
+            IERC20Upgradeable(underlyingToken).safeTransferFrom(msg.sender, address(this), _borrowedAmount);
+        }
 
         address shareLocker = creditManagersShareLocker[msg.sender];
 
@@ -147,7 +165,7 @@ abstract contract AbstractVault is
 
         _burn(shareLocker, _borrowedAmount);
 
-        emit Repay(msg.sender, _borrowedAmount);
+        emit Repay(msg.sender, _borrowedAmount, _repayAmountDuringLiquidation, _liquidating);
     }
 
     /// @notice set supply reward pool
@@ -170,6 +188,17 @@ abstract contract AbstractVault is
         borrowedRewardPool = _rewardPool;
 
         emit SetBorrowedRewardPool(_rewardPool);
+    }
+
+    /// @notice set reward tracker
+    /// @param _tracker tracker address
+    function setRewardTracker(address _tracker) external onlyOwner {
+        require(_tracker != address(0), "AbstractVault: _tracker cannot be 0x0");
+        require(address(rewardTracker) == address(0), "AbstractVault: Cannot run this function twice");
+
+        rewardTracker = IRewardTracker(_tracker);
+
+        emit SetRewardTracker(_tracker);
     }
 
     /// @notice return number of managers

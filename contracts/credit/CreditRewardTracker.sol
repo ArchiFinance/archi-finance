@@ -5,6 +5,7 @@ pragma solidity =0.8.4;
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { AddressUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 
+import { IRewardTracker } from "../interfaces/IRewardTracker.sol";
 import { ICreditManager } from "../credit/interfaces/ICreditManager.sol";
 import { IDepositor } from "../depositors/interfaces/IDepositor.sol";
 
@@ -13,7 +14,7 @@ This contract is used to bind the rewardTracker variable of the Depositor contra
 It can be used to call the harvest method, and only authorized governance personnel can call this contract.
 */
 
-contract CreditRewardTracker is Initializable {
+contract CreditRewardTracker is Initializable, IRewardTracker {
     using AddressUpgradeable for address;
 
     uint256 private constant MAX_DEPOSITOR_SIZE = 8;
@@ -21,27 +22,20 @@ contract CreditRewardTracker is Initializable {
 
     address public owner;
     address public pendingOwner;
-    uint256 public duration;
 
     uint256[2] public lastInteractedAt;
 
     address[] public managers;
     address[] public depositors;
 
-    mapping(address => bool) private governors;
+    mapping(address => bool) private vaultCanExecute;
 
     error NotAuthorized();
-    event NewGovernor(address indexed _sender, address _governor);
-    event RemoveGovernor(address indexed _sender, address _governor);
     event Executed(address _sender, address _target, uint256 _claimed, uint256 _timestamp);
+    event ToggleVaultCanExecute(address _vault, bool _state);
 
     modifier onlyOwner() {
         if (owner != msg.sender) revert NotAuthorized();
-        _;
-    }
-
-    modifier onlyGovernors() {
-        if (!isGovernor(msg.sender)) revert NotAuthorized();
         _;
     }
 
@@ -54,15 +48,13 @@ contract CreditRewardTracker is Initializable {
         require(_owner != address(0), "CreditRewardTracker: _owner cannot be 0x0");
 
         owner = _owner;
-
-        governors[_owner] = true;
-        duration = 10 minutes;
     }
 
     /// @notice set pending owner
     /// @param _owner owner address
     function setPendingOwner(address _owner) external onlyOwner {
         require(_owner != address(0), "CreditRewardTracker: _owner cannot be 0x0");
+
         pendingOwner = _owner;
     }
 
@@ -75,41 +67,12 @@ contract CreditRewardTracker is Initializable {
         pendingOwner = address(0);
     }
 
-    /// @notice add new governor
-    /// @param _newGovernor governor address
-    function addGovernor(address _newGovernor) public onlyOwner {
-        require(_newGovernor != address(0), "CreditRewardTracker: _newGovernor cannot be 0x0");
-        require(!isGovernor(_newGovernor), "CreditRewardTracker: _newGovernor is already governor");
+    function toggleVaultCanExecute(address _vault) external onlyOwner {
+        require(_vault != address(0), "CreditRewardTracker: _vault cannot be 0x0");
 
-        governors[_newGovernor] = true;
+        vaultCanExecute[_vault] = !vaultCanExecute[_vault];
 
-        emit NewGovernor(msg.sender, _newGovernor);
-    }
-
-    /// @notice add governors
-    /// @param _newGovernors governors array
-    function addGovernors(address[] calldata _newGovernors) external onlyOwner {
-        for (uint256 i = 0; i < _newGovernors.length; i++) {
-            addGovernor(_newGovernors[i]);
-        }
-    }
-
-    /// @notice remove governor
-    /// @param _governor governor address
-    function removeGovernor(address _governor) external onlyOwner {
-        require(_governor != address(0), "CreditRewardTracker: _governor cannot be 0x0");
-        require(isGovernor(_governor), "CreditRewardTracker: _governor is not a governor");
-
-        governors[_governor] = false;
-
-        emit RemoveGovernor(msg.sender, _governor);
-    }
-
-    /// @notice judge if its governor
-    /// @param _governor governor address
-    /// @return bool value
-    function isGovernor(address _governor) public view returns (bool) {
-        return governors[_governor];
+        emit ToggleVaultCanExecute(_vault, vaultCanExecute[_vault]);
     }
 
     /// @notice add CreditManager
@@ -156,16 +119,8 @@ contract CreditRewardTracker is Initializable {
         depositors.pop();
     }
 
-    /// @notice set minimum execute time difference
-    /// @param _duration time stamp
-    function setDuration(uint256 _duration) external onlyOwner {
-        duration = _duration;
-    }
-
-    /// @notice execute harvest in managers
-    function harvestDepositors() external onlyGovernors {
-        require(block.timestamp - lastInteractedAt[0] >= duration, "CreditRewardTracker: Incorrect duration");
-
+    /// @dev helper function of HarvestDepositors
+    function _harvestDepositors() internal {
         lastInteractedAt[0] = block.timestamp;
 
         for (uint256 i = 0; i < depositors.length; i++) {
@@ -175,10 +130,8 @@ contract CreditRewardTracker is Initializable {
         }
     }
 
-    /// @notice execute harvest in depositors
-    function harvestManagers() external onlyGovernors {
-        require(block.timestamp - lastInteractedAt[1] >= duration, "CreditRewardTracker: Incorrect duration");
-
+    /// @dev helper function of harvestManagers
+    function _harvestManagers() internal {
         lastInteractedAt[1] = block.timestamp;
 
         for (uint256 i = 0; i < managers.length; i++) {
@@ -186,6 +139,26 @@ contract CreditRewardTracker is Initializable {
 
             emit Executed(msg.sender, managers[i], claimed, lastInteractedAt[1]);
         }
+    }
+
+    /// @notice execute harvest in depositors
+    function harvestDepositors() external onlyOwner {
+        _harvestDepositors();
+    }
+
+    /// @notice execute harvest in managers
+    function harvestManagers() external onlyOwner {
+        _harvestManagers();
+    }
+
+    /// @notice execute harvest in managers depositors
+    function execute() external override {
+        if (vaultCanExecute[msg.sender]) {
+            _harvestDepositors();
+            return;
+        }
+
+        revert("CreditRewardTracker: Not allowed");
     }
 
     /// @notice managers length

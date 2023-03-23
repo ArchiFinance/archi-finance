@@ -3,6 +3,7 @@ import { Contract, ContractTransaction, PayableOverrides } from "ethers";
 import JSONdb from "simple-json-db";
 import { BytesLike, Interface } from "ethers/lib/utils";
 import { SimpleProxy as SimpleProxyInterface } from "../typechain";
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 
 const fs = require("fs");
 const path = require("path");
@@ -64,6 +65,7 @@ const TOKENS: {
     LINK: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4",
     UNI: "0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0",
     FRAX: "0x17FC002b466eEc40DaE837Fc4bE5c67993ddBd6F",
+    MIM: "0xFEa7a6a0B346362BF88A9e4A88416B77a57D6c2A",
 }
 
 const TOKENS_DECIMALS: {
@@ -77,6 +79,7 @@ const TOKENS_DECIMALS: {
     LINK: 18,
     UNI: 18,
     FRAX: 18,
+    MIM: 18,
 }
 
 interface IMulticall {
@@ -190,6 +193,31 @@ const evmSnapshot = async () => {
     });
 }
 
+const evmSnapshotRun = async (cb: CallableFunction) => {
+    const snapshotId = (await evmSnapshot()) as string;
+    await evmMine();
+    await cb();
+    await evmRevert(snapshotId);
+}
+
+const impersonateAccount = async (account: Array<string>) => {
+    return network.provider.request({
+        method: "hardhat_impersonateAccount",
+        params: account,
+    });
+}
+
+const impersonatedSigner = async (account: string): Promise<SignerWithAddress> => {
+    return impersonateAccount([account]).then(() => {
+        return network.provider.send("hardhat_setBalance", [
+            account,
+            "0xDE0B6B3A7640000",
+        ])
+    }).then(() => {
+        return ethers.getSigner(account);
+    });
+}
+
 const hardHatReset = async () => {
     return network.provider.request({
         method: "hardhat_reset",
@@ -216,5 +244,8 @@ export {
     evmMine,
     evmRevert,
     evmSnapshot,
+    evmSnapshotRun,
+    impersonateAccount,
+    impersonatedSigner,
     hardHatReset
 }

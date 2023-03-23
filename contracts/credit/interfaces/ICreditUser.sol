@@ -7,6 +7,7 @@ interface ICreditUser {
         address depositor;
         address token;
         uint256 amountIn;
+        uint256 reservedLiquidatorFee;
         address[] borrowedTokens;
         uint256[] ratios;
         bool terminated;
@@ -28,6 +29,7 @@ interface ICreditUser {
         address _depositor,
         address _token,
         uint256 _amountIn,
+        uint256 _reservedLiquidatorFee,
         address[] calldata _borrowedTokens,
         uint256[] calldata _ratios
     ) external;
@@ -41,7 +43,13 @@ interface ICreditUser {
         uint256[] calldata _borrowedMintedAmount
     ) external;
 
-    function destroy(address _recipient, uint256 _borrowedIndex) external;
+    function destroy(
+        address _recipient,
+        uint256 _borrowedIndex,
+        address _liquidator
+    ) external;
+
+    function hasPassedSinceLastTerminated(address _recipient, uint256 _duration) external view returns (bool);
 
     function isTerminated(address _recipient, uint256 _borrowedIndex) external view returns (bool);
 
@@ -58,6 +66,7 @@ interface ICreditUser {
             address depositor,
             address token,
             uint256 amountIn,
+            uint256 _reservedLiquidatorFee,
             address[] memory borrowedTokens,
             uint256[] memory ratio
         );

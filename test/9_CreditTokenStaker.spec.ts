@@ -55,8 +55,11 @@ describe("CreditTokenStaker contract", () => {
 
         expect(creditTokenStaker.addOwner(test1Signer.address)).to.be.revertedWith("CreditTokenStaker: _newOwner is already owner");
         expect(creditTokenStaker.removeOwner(test2Signer.address)).to.be.revertedWith("CreditTokenStaker: _owner is not an owner");
-
         expect(await creditTokenStaker.isOwner(test1Signer.address)).to.be.eq(true);
+
+        await creditTokenStaker.removeOwner(test1Signer.address);
+
+        expect(creditTokenStaker.removeOwner(deployer.address)).to.be.revertedWith("CreditTokenStaker: totalOwners must be greater than 1");
     });
 
     it("Test #setCreditToken", async () => {

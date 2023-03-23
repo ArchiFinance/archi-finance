@@ -18,12 +18,12 @@ async function deployVault(deployer: Signer, tokenName: string, isPasued: boolea
     const depositorRewardDistributor = await ethers.getContractAt("DepositorRewardDistributor", db.get("DepositorRewardDistributorProxy").logic, deployer);
     const creditRewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
 
-    let needSetWrappedToken: boolean = false;
+    let isWrappedToken: boolean = false;
     let vault;
 
     if (tokenName === "WETH") {
         vault = await ETHVault(proxyAdmin.address, TOKENS[tokenName], tokenName);
-        needSetWrappedToken = true;
+        isWrappedToken = true;
     } else {
         vault = await ERC20Vault(proxyAdmin.address, TOKENS[tokenName], tokenName);
     }
@@ -61,8 +61,9 @@ async function deployVault(deployer: Signer, tokenName: string, isPasued: boolea
         supplyRewardPool: supplyRewardPool,
         borrowedRewardPool: borrowedRewardPool,
         vaultRewardDistributor: vaultRewardDistributor,
-        needSetWrappedToken: needSetWrappedToken,
+        isWrappedToken: isWrappedToken,
         depositorRewardDistributor: depositorRewardDistributor,
+        creditRewardTracker: creditRewardTracker,
         paused: isPasued,
     };
 }
@@ -73,18 +74,20 @@ async function updateContract(deployer: Signer, vault: any) {
     vaultMC
         .addEncodeFunctionData("setSupplyRewardPool", [vault.supplyRewardPool.address])
         .addEncodeFunctionData("setBorrowedRewardPool", [vault.borrowedRewardPool.address])
-        .addEncodeFunctionData("addCreditManager", [vault.vaultManager.address]);
+        .addEncodeFunctionData("addCreditManager", [vault.vaultManager.address])
+        .addEncodeFunctionData("setRewardTracker", [vault.creditRewardTracker.address]);
 
     await waitTx([await vault.vaultRewardDistributor.setSupplyRewardPool(vault.supplyRewardPool.address)]);
     await waitTx([await vault.vaultRewardDistributor.setBorrowedRewardPool(vault.borrowedRewardPool.address)]);
     await waitTx([await vault.depositorRewardDistributor.addExtraReward(vault.vaultRewardDistributor.address)]);
+    await waitTx([await vault.creditRewardTracker.toggleVaultCanExecute(vault.vault.address)]);
 
-    if (vault.needSetWrappedToken) {
+    if (vault.isWrappedToken) {
         vaultMC.addEncodeFunctionData("setWrappedToken", [TOKENS.WETH]);
     }
 
     if (vault.paused) {
-        vaultMC.addEncodeFunctionData("pause", []);
+        vaultMC.addEncodeFunctionData("pause");
     }
 
     await vaultMC.waitTx();
@@ -99,6 +102,7 @@ async function main() {
         await deployVault(deployer, "WETH", false),
         await deployVault(deployer, "USDT", false),
         await deployVault(deployer, "USDC", false),
+        await deployVault(deployer, "DAI", false),
         //
     ]).then(async (values) => {
         for (const idx in values) {

@@ -79,6 +79,7 @@ contract CreditManager is Initializable, ReentrancyGuardUpgradeable, ICreditMana
     /// @param _recipient user
     /// @param _borrowedAmount borrow amount
     function borrow(address _recipient, uint256 _borrowedAmount) external override onlyCaller {
+        _harvest();
         _updateRewards(_recipient);
 
         User storage user = users[_recipient];
@@ -97,27 +98,39 @@ contract CreditManager is Initializable, ReentrancyGuardUpgradeable, ICreditMana
     /// @notice repay loans
     /// @param _recipient user
     /// @param _borrowedAmount repaid amount
-    function repay(address _recipient, uint256 _borrowedAmount) external override onlyCaller {
+    /// @param _repayAmountDuringLiquidation the actual amount that can be repaid when the user undergoes liquidation
+    /// @param _liquidating if liquidation occurs, true will be passed in, and _repayAmountDuringLiquidation may be 0 at the same time.
+    function repay(
+        address _recipient,
+        uint256 _borrowedAmount,
+        uint256 _repayAmountDuringLiquidation,
+        bool _liquidating
+    ) external override onlyCaller {
+        _harvest();
         _updateRewards(_recipient);
 
         address underlyingToken = IAbstractVault(vault).underlyingToken();
 
-        IERC20Upgradeable(underlyingToken).safeTransferFrom(msg.sender, address(this), _borrowedAmount);
-
-        _approve(underlyingToken, vault, _borrowedAmount);
+        if (_liquidating) {
+            if (_repayAmountDuringLiquidation > 0) {
+                _approve(underlyingToken, vault, _repayAmountDuringLiquidation);
+                IERC20Upgradeable(underlyingToken).safeTransferFrom(msg.sender, address(this), _repayAmountDuringLiquidation);
+            }
+        } else {
+            _approve(underlyingToken, vault, _borrowedAmount);
+            IERC20Upgradeable(underlyingToken).safeTransferFrom(msg.sender, address(this), _borrowedAmount);
+        }
 
         User storage user = users[_recipient];
         totalShares = totalShares - _borrowedAmount;
         user.shares = user.shares - _borrowedAmount;
 
-        IAbstractVault(vault).repay(_borrowedAmount);
+        IAbstractVault(vault).repay(_borrowedAmount, _repayAmountDuringLiquidation, _liquidating);
 
-        emit Repay(_recipient, _borrowedAmount, totalShares, user.shares);
+        emit Repay(_recipient, _borrowedAmount, _repayAmountDuringLiquidation, _liquidating, totalShares, user.shares);
     }
 
-    /// @notice harvest interest
-    /// @return amount of interest harvested
-    function harvest() external override nonReentrant onlyRewardTracker returns (uint256) {
+    function _harvest() internal returns (uint256) {
         address shareLocker = IAbstractVault(vault).creditManagersShareLocker(address(this));
         uint256 claimed = IShareLocker(shareLocker).harvest();
 
@@ -136,6 +149,12 @@ contract CreditManager is Initializable, ReentrancyGuardUpgradeable, ICreditMana
         return claimed;
     }
 
+    /// @notice harvest interest
+    /// @return amount of interest harvested
+    function harvest() external override nonReentrant onlyRewardTracker returns (uint256) {
+        return _harvest();
+    }
+
     function _updateRewards(address _recipient) internal {
         User storage user = users[_recipient];
 
@@ -149,6 +168,7 @@ contract CreditManager is Initializable, ReentrancyGuardUpgradeable, ICreditMana
     /// @param _recipient user
     /// @return claimed user interest amount
     function claim(address _recipient) external override nonReentrant returns (uint256 claimed) {
+        _harvest();
         _updateRewards(_recipient);
 
         address rewardPool = IAbstractVault(vault).borrowedRewardPool();

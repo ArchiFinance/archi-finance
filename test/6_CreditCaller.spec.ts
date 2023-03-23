@@ -1,28 +1,58 @@
 /* eslint-disable node/no-missing-import */
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { db, evmMine, evmRevert, evmSnapshot, increaseDays, increaseMinutes, removeDb, TOKENS } from "../scripts/utils";
+import { db, evmMine, increaseDays, increaseMinutes, impersonatedSigner, removeDb, TOKENS, evmSnapshotRun } from "../scripts/utils";
 import { BigNumber } from "ethers";
 import { main as Base } from "../scripts/deploys/1_base";
 import { main as Vault } from "../scripts/deploys/2_vault";
-import { main as Initial } from "../scripts/deploys/3_initialize";
+import { main as Initialize } from "../scripts/deploys/3_initialize";
 import { loadFixture } from "ethereum-waffle";
 import { deployAddressProvider, deployMockTokens, deployProxyAdmin } from "./LoadFixture";
+import { AbstractVault } from "../typechain";
 
 const ZERO = `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`;
+const LIQUIDATE_THRESHOLD = 400;
+const MAX_LOAN_DURATION = 365;
 
-async function _swapToken(toToken: string, ethAmountIn: BigNumber) {
+async function mockPriceFeed(tokenFeeds: Array<any>, cb: CallableFunction) {
     const [deployer] = await ethers.getSigners();
-    const gmxRouter = await ethers.getContractAt(require("../scripts/abis/GmxRoute"), "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", deployer);
 
-    await gmxRouter.swapETHToTokens([TOKENS.WETH, toToken], 0, deployer.address, { value: ethAmountIn });
+    const gmxVaultAddress = `0x489ee077994B6658eAfA855C308275EAd8097C4A`;
+    const gmxVault = await ethers.getContractAt(require("../scripts/abis/GmxVault"), gmxVaultAddress, deployer);
+
+    const govSigner = await impersonatedSigner(await gmxVault.gov());
+
+    const MockGmxVaultPriceFeedFactory = await ethers.getContractFactory("MockGmxVaultPriceFeed", deployer);
+    const MockGmxVaultPriceFeed = await MockGmxVaultPriceFeedFactory.deploy();
+    const mockGmxVaultPriceFeed = await MockGmxVaultPriceFeed.deployed();
+
+    for (const fake of tokenFeeds) {
+        await mockGmxVaultPriceFeed.setPrice(fake.token, fake.price);
+    }
+
+    return evmSnapshotRun(async () => {
+        await gmxVault.connect(govSigner).setPriceFeed(mockGmxVaultPriceFeed.address);
+        await evmMine();
+        await cb();
+    });
+}
+
+async function getCollateralReward(recipient: string): Promise<BigNumber> {
+    const [deployer] = await ethers.getSigners();
+    const collateralReward = await ethers.getContractAt("CollateralReward", db.get("CollateralRewardProxy").logic, deployer);
+
+    return collateralReward.balanceOf(recipient);
+}
+
+async function getWethBorrowedRewardVsTokenSupply(vault: AbstractVault): Promise<BigNumber> {
+    return vault.balanceOf(await vault.borrowedRewardPool());
 }
 
 describe("CreditCaller & CreditManager contract", () => {
     beforeEach(async () => {
         await Base();
         await Vault();
-        await Initial();
+        await Initialize();
     });
 
     after(async () => {
@@ -122,9 +152,7 @@ describe("CreditCaller & CreditManager contract", () => {
         ).to.be.revertedWith("CreditCaller: Not whitelisted");
 
         await caller.openLendCredit(depositer, ZERO, collateralAmountIn, [TOKENS.WETH], [400], deployer.address, { value: collateralAmountIn });
-
         await caller.setAllowlist(ethers.constants.AddressZero);
-
         await caller.openLendCredit(depositer, TOKENS.WETH, collateralAmountIn, [TOKENS.WETH], [400], deployer.address);
 
         const creditUser = await ethers.getContractAt("CreditUser", db.get("CreditUserProxy").logic, deployer);
@@ -137,50 +165,30 @@ describe("CreditCaller & CreditManager contract", () => {
         expect(caller.liquidate(deployer.address, 0)).to.be.revertedWith("CreditCaller: Minimum limit exceeded");
         expect(caller.liquidate(deployer.address, creditCounts.add(1))).to.be.revertedWith("CreditCaller: Index out of range");
 
+        const lendCreditInfo = await creditUser.getUserLendCredit(deployer.address, creditCounts);
+
+        expect(lendCreditInfo.amountIn).to.be.eq(BigNumber.from(collateralAmountIn.sub(collateralAmountIn.mul(100).div(1000))));
+
         const creditRewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
-
-        await creditRewardTracker.execute();
-
-        let snapshotId = (await evmSnapshot()) as string;
-        await increaseMinutes(120);
-        await evmMine();
-        await evmRevert(snapshotId);
-
-        await caller.liquidate(deployer.address, creditCounts);
-
-        snapshotId = (await evmSnapshot()) as string;
-        await increaseDays(365);
-        await evmMine();
-        try {
-            await caller.repayCredit(creditCounts);
-        } catch (error: any) {
-            expect(error.message).to.match(/CreditCaller: Already timeout/);
-        }
-
-        await evmRevert(snapshotId);
-
-        await caller.repayCredit(creditCounts);
-        expect(caller.repayCredit(creditCounts)).to.be.revertedWith("CreditCaller: Already terminated");
-
-        snapshotId = (await evmSnapshot()) as string;
-        await increaseDays(365);
-        await evmMine();
-        await caller.liquidate(deployer.address, creditCounts.sub(1));
-        try {
-            await caller.liquidate(deployer.address, creditCounts.sub(1));
-        } catch (error: any) {
-            expect(error.message).to.match(/CreditCaller: Already terminated/);
-        }
-        await evmRevert(snapshotId);
+        await creditRewardTracker.harvestDepositors();
+        await creditRewardTracker.harvestManagers();
 
         const manager = await ethers.getContractAt("CreditManager", db.get("WETHVaultManagerProxy").logic, deployer);
+        await manager.claim(deployer.address);
+
+        await evmSnapshotRun(async () => {
+            await increaseMinutes(120);
+            await evmMine();
+            await manager.claim(deployer.address);
+        });
 
         await manager.balanceOf(deployer.address);
         await manager.pendingRewards(deployer.address);
-        await manager.claim(deployer.address);
 
         expect(manager.borrow(deployer.address, 0)).to.be.revertedWith("CreditManager: Caller is not the caller");
         expect(manager.harvest()).to.be.revertedWith("CreditManager: Caller is not the reward tracker");
+
+        await caller.repayCredit(creditCounts);
     });
 
     it("Test strategy", async () => {
@@ -276,6 +284,319 @@ describe("CreditCaller & CreditManager contract", () => {
         vaults.push(db.get("WETHVaultProxy").logic);
 
         expect(caller.addStrategy(depositer, collateralReward, vaults, vaultRewards)).to.be.revertedWith("CreditCaller: Length mismatch");
+    });
+
+    it("Test #setLiquidateThreshold", async () => {
+        const [deployer] = await ethers.getSigners();
+
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        expect(caller.setLiquidateThreshold(501)).to.be.revertedWith("CreditCaller: MAX_LIQUIDATE_THRESHOLD limit exceeded");
+        expect(caller.setLiquidateThreshold(299)).to.be.revertedWith("CreditCaller: MIN_LIQUIDATE_THRESHOLD limit exceeded");
+
+        await caller.setLiquidateThreshold(LIQUIDATE_THRESHOLD);
+    });
+
+    it("Test #setLiquidatorFee", async () => {
+        const [deployer] = await ethers.getSigners();
+
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        expect(caller.setLiquidatorFee(201)).to.be.revertedWith("CreditCaller: MAX_LIQUIDATOR_FEE limit exceeded");
+        expect(caller.setLiquidatorFee(49)).to.be.revertedWith("CreditCaller: MIN_LIQUIDATOR_FEE limit exceeded");
+
+        await caller.setLiquidatorFee(150);
+    });
+
+    it("Test MIM #openLendCredit", async () => {
+        const [borrower, deployer, liquidityProvider] = await ethers.getSigners();
+        // Impersonate one of the MIM minter wallets so we can mint MIM to the borrower user
+        const minter = await impersonatedSigner("0xC931f61B1534EB21D8c11B24f3f5Ab2471d4aB50");
+        // Fork the MIM contract
+        const mim = await ethers.getContractAt(require("../scripts/abis/MIM"), TOKENS.MIM, deployer);
+
+        const vault = await ethers.getContractAt("ETHVault", db.get("WETHVaultProxy").logic, deployer);
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        // WETH liquidity supply
+        const supplyAmountIn = ethers.utils.parseEther("20");
+        // MIM collateral amount
+        const collateralAmountIn = ethers.utils.parseEther("0.01");
+
+        // Mint MIM to the borrower
+        await mim.connect(minter).mint(borrower.address, ethers.utils.parseEther("1"));
+
+        // Add liquidity to the WETH vault so the borrower can borrow the specified amount
+        await vault.connect(liquidityProvider).addLiquidity(supplyAmountIn, { value: supplyAmountIn });
+
+        // Approve the CreditCaller contract to transfer the collateral amount in
+        await mim.connect(borrower).approve(caller.address, collateralAmountIn);
+
+        const depositer = db.get("GMXDepositorProxy").logic;
+
+        expect(
+            caller.connect(borrower).openLendCredit(
+                depositer, // The only depositor in the system
+                TOKENS.MIM, // Use MIM as the collateral token
+                collateralAmountIn, // Use this as the collateral amount
+                [TOKENS.WETH], // Only borrow WETH
+                [500], // Take 5X WETH leverage
+                borrower.address // The borrower is the recepient of the borrowed amounts
+            )
+        ).to.be.revertedWith("CreditCaller: The collateral asset must be one of the borrow tokens");
+    });
+
+    it("Test repayment & liquidation after 900% increase in ETH price", async () => {
+        /* 
+            Assuming ETH price increases by over 900%, 
+            and we borrow ETH three times, 
+            the experimental results should show a health factor below LIQUIDATE_THRESHOLD, with the user having enough GLP only to repay the first loan.
+        */
+
+        const [deployer, liquidator] = await ethers.getSigners();
+
+        const supplyAmountIn = ethers.utils.parseEther("20");
+        const collateralAmountIn = ethers.utils.parseEther("1");
+        const wethVault = await ethers.getContractAt("ETHVault", db.get("WETHVaultProxy").logic, deployer);
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        await wethVault.addLiquidity(supplyAmountIn, { value: supplyAmountIn });
+
+        await caller.openLendCredit(
+            db.get("GMXDepositorProxy").logic,
+            ZERO,
+            collateralAmountIn,
+            [TOKENS.WETH, TOKENS.WETH, TOKENS.WETH],
+            [500, 300, 100],
+            deployer.address,
+            {
+                value: collateralAmountIn,
+            }
+        );
+
+        const creditUser = await ethers.getContractAt("CreditUser", db.get("CreditUserProxy").logic, deployer);
+        const creditCounts = await creditUser.getUserCounts(deployer.address);
+
+        // Testing a normal liquidation once should theoretically be ineffective.
+        await caller.liquidate(deployer.address, creditCounts);
+
+        const aggregator = await ethers.getContractAt("CreditAggregator", db.get("CreditAggregatorProxy").logic, deployer);
+        const ethPrice = await aggregator.getTokenPrice(TOKENS.WETH);
+
+        await mockPriceFeed([{ token: TOKENS.WETH, price: ethPrice.mul(100 + 900).div(100) }], async () => {
+            const health = await caller.getUserCreditHealth(deployer.address, creditCounts);
+
+            if (health.toNumber() <= LIQUIDATE_THRESHOLD) {
+                // If the liquidation robot is not working, an error will occur when the user selects repayment.
+                try {
+                    await caller.repayCredit(creditCounts);
+                } catch (error: any) {
+                    expect(error.message).to.match(/CreditCaller: The current position needs to be liquidated/);
+                }
+
+                // Re-liquidate the leveraged position placed just now.
+                await caller.connect(liquidator).liquidate(deployer.address, creditCounts);
+                // The liquidator receives a liquidation fee.
+                const { weth } = await loadFixture(deployMockTokens);
+                expect(await weth.balanceOf(creditUser.address)).to.be.eq(BigNumber.from(0));
+                expect(await weth.balanceOf(liquidator.address)).to.be.above(0);
+
+                expect(await getCollateralReward(deployer.address)).to.be.eq(BigNumber.from(0));
+                expect(await getWethBorrowedRewardVsTokenSupply(wethVault as AbstractVault)).to.be.eq(BigNumber.from(0));
+
+                // Attempting to re-liquidate after simulating the liquidation results in an error.
+                try {
+                    await caller.liquidate(deployer.address, creditCounts);
+                } catch (error: any) {
+                    expect(error.message).to.match(/CreditCaller: Already terminated/);
+                }
+            } else {
+                await caller.repayCredit(creditCounts);
+            }
+        });
+    });
+
+    
+
+    it("Test the liquidation situation of different assets for loans", async () => {
+        const [deployer] = await ethers.getSigners();
+
+        const supplyAmountIn = ethers.utils.parseEther("20");
+        const collateralAmountIn = ethers.utils.parseEther("1");
+        const wethVault = await ethers.getContractAt("ETHVault", db.get("WETHVaultProxy").logic, deployer);
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        await wethVault.addLiquidity(supplyAmountIn, { value: supplyAmountIn });
+
+        const daiVault = await ethers.getContractAt("ERC20Vault", db.get("DAIVaultProxy").logic, deployer);
+        const dai = await ethers.getContractAt(require("../scripts/abis/DAI"), TOKENS.DAI, deployer);
+        const daiMinter = await impersonatedSigner(`0x10E6593CDda8c58a1d0f14C5164B376352a55f2F`);
+
+        await dai.connect(daiMinter).mint(deployer.address, supplyAmountIn.mul(10000));
+        await dai.approve(daiVault.address, supplyAmountIn.mul(10000));
+        await daiVault.addLiquidity(supplyAmountIn.mul(10000));
+
+        await caller.openLendCredit(db.get("GMXDepositorProxy").logic, ZERO, collateralAmountIn, [TOKENS.WETH, TOKENS.DAI], [200, 700], deployer.address, {
+            value: collateralAmountIn,
+        });
+
+        const creditUser = await ethers.getContractAt("CreditUser", db.get("CreditUserProxy").logic, deployer);
+        const creditCounts = await creditUser.getUserCounts(deployer.address);
+
+        const aggregator = await ethers.getContractAt("CreditAggregator", db.get("CreditAggregatorProxy").logic, deployer);
+        const ethPrice = await aggregator.getTokenPrice(TOKENS.WETH);
+        const daiPrice = await aggregator.getTokenPrice(TOKENS.DAI);
+
+        await mockPriceFeed(
+            [
+                { token: TOKENS.WETH, price: ethPrice.mul(100 + 900).div(100) },
+                { token: TOKENS.DAI, price: daiPrice },
+            ],
+            async () => {
+                const health = await caller.getUserCreditHealth(deployer.address, creditCounts);
+
+                if (health.toNumber() <= LIQUIDATE_THRESHOLD) {
+                    await caller.liquidate(deployer.address, creditCounts);
+                }
+            }
+        );
+
+        // Just now was a snapshot, now it's normal repayment.
+        await caller.repayCredit(creditCounts);
+    });
+
+    it("Test simulate liquidation after normal timeout, with no significant change in GLP price", async () => {
+        const [deployer] = await ethers.getSigners();
+
+        const supplyAmountIn = ethers.utils.parseEther("20");
+        const collateralAmountIn = ethers.utils.parseEther("1");
+        const wethVault = await ethers.getContractAt("ETHVault", db.get("WETHVaultProxy").logic, deployer);
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        await wethVault.addLiquidity(supplyAmountIn, { value: supplyAmountIn });
+
+        await caller.openLendCredit(
+            db.get("GMXDepositorProxy").logic,
+            ZERO,
+            collateralAmountIn,
+            [TOKENS.WETH, TOKENS.WETH, TOKENS.WETH],
+            [500, 300, 100],
+            deployer.address,
+            {
+                value: collateralAmountIn,
+            }
+        );
+
+        const creditUser = await ethers.getContractAt("CreditUser", db.get("CreditUserProxy").logic, deployer);
+        const creditCounts = await creditUser.getUserCounts(deployer.address);
+
+        await evmSnapshotRun(async () => {
+            await increaseDays(MAX_LOAN_DURATION);
+            await evmMine();
+
+            // Simulating repayment after MAX_LOAN_DURATION days without payment will result in an error if repayment is attempted at this time.
+            try {
+                await caller.repayCredit(creditCounts);
+            } catch (error: any) {
+                expect(error.message).to.match(/CreditCaller: Already timeout/);
+            }
+
+            await caller.liquidate(deployer.address, creditCounts);
+
+            // After simulating the liquidation, an error will occur if the user continues to repay the loan.
+            try {
+                await caller.repayCredit(creditCounts);
+            } catch (error: any) {
+                expect(error.message).to.match(/CreditCaller: Already terminated/);
+            }
+        });
+    });
+
+    it("Test after simulating repayment or liquidation, the user will be unable to continue borrowing", async () => {
+        const [deployer] = await ethers.getSigners();
+
+        const supplyAmountIn = ethers.utils.parseEther("20");
+        const collateralAmountIn = ethers.utils.parseEther("1");
+        const wethVault = await ethers.getContractAt("ETHVault", db.get("WETHVaultProxy").logic, deployer);
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        await wethVault.addLiquidity(supplyAmountIn, { value: supplyAmountIn });
+
+        await caller.openLendCredit(
+            db.get("GMXDepositorProxy").logic,
+            ZERO,
+            collateralAmountIn,
+            [TOKENS.WETH, TOKENS.WETH, TOKENS.WETH],
+            [500, 300, 100],
+            deployer.address,
+            {
+                value: collateralAmountIn,
+            }
+        );
+
+        const creditUser = await ethers.getContractAt("CreditUser", db.get("CreditUserProxy").logic, deployer);
+        const creditCounts = await creditUser.getUserCounts(deployer.address);
+
+        await caller.repayCredit(creditCounts);
+
+        try {
+            await caller.openLendCredit(
+                db.get("GMXDepositorProxy").logic,
+                ZERO,
+                collateralAmountIn,
+                [TOKENS.WETH, TOKENS.WETH, TOKENS.WETH],
+                [500, 300, 100],
+                deployer.address,
+                {
+                    value: collateralAmountIn,
+                }
+            );
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditCaller: The next loan period is invalid/);
+        }
+    });
+
+    it("Test repayment & liquidation after 99% drops in ETH price", async () => {
+        const [deployer] = await ethers.getSigners();
+
+        const supplyAmountIn = ethers.utils.parseEther("20");
+        const collateralAmountIn = ethers.utils.parseEther("1");
+        const wethVault = await ethers.getContractAt("ETHVault", db.get("WETHVaultProxy").logic, deployer);
+        const caller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
+
+        await wethVault.addLiquidity(supplyAmountIn, { value: supplyAmountIn });
+
+        await caller.openLendCredit(
+            db.get("GMXDepositorProxy").logic,
+            ZERO,
+            collateralAmountIn,
+            [TOKENS.WETH, TOKENS.WETH, TOKENS.WETH],
+            [500, 300, 100],
+            deployer.address,
+            {
+                value: collateralAmountIn,
+            }
+        );
+
+        const creditUser = await ethers.getContractAt("CreditUser", db.get("CreditUserProxy").logic, deployer);
+        const creditCounts = await creditUser.getUserCounts(deployer.address);
+
+        const aggregator = await ethers.getContractAt("CreditAggregator", db.get("CreditAggregatorProxy").logic, deployer);
+        const ethPrice = await aggregator.getTokenPrice(TOKENS.WETH);
+
+        await mockPriceFeed([{ token: TOKENS.WETH, price: ethPrice.mul(100 - 99).div(100) }], async () => {
+            const health = await caller.getUserCreditHealth(deployer.address, creditCounts);
+
+            expect(health.toNumber()).to.be.above(LIQUIDATE_THRESHOLD);
+
+            await caller.repayCredit(creditCounts);
+
+            const { weth } = await loadFixture(deployMockTokens);
+            expect(await weth.balanceOf(creditUser.address)).to.be.eq(BigNumber.from(0));
+
+            expect(await getCollateralReward(deployer.address)).to.be.eq(BigNumber.from(0));
+            expect(await getWethBorrowedRewardVsTokenSupply(wethVault as AbstractVault)).to.be.eq(BigNumber.from(0));
+        });
     });
 
     it("Test #renounceOwnership", async () => {

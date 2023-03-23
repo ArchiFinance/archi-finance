@@ -5,9 +5,11 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import { SafeMathUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
 import { AddressUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 import { ICreditAggregator } from "./interfaces/ICreditAggregator.sol";
 import { IAddressProvider } from "../interfaces/IAddressProvider.sol";
+import { IPriceFeed } from "../interfaces/IPriceFeed.sol";
 import { IGmxRewardRouter } from "../depositors/interfaces/IGmxRewardRouter.sol";
 import { IGlpManager } from "../depositors/interfaces/IGlpManager.sol";
 import { IGmxVault } from "../depositors/interfaces/IGmxVault.sol";
@@ -19,13 +21,15 @@ determining how many tokens users can receive by selling GLP,
 how many tokens are required to buy GLP, and the interface for calculating token prices in the GMX deposit pool.
 */
 
-contract CreditAggregator is Initializable, ICreditAggregator {
+contract CreditAggregator is Initializable, ICreditAggregator, OwnableUpgradeable {
     using SafeMathUpgradeable for uint256;
     using AddressUpgradeable for address;
 
     address private constant ZERO = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    uint256 private constant GMX_DIVISION_LOSS_COMPENSATION = 10000; // 0.01 %
+    uint256 private constant GMX_DIVISION_LOSS_COMPENSATION = 1000; // 0.1 %
     uint256 private constant BASIS_POINTS_DIVISOR = 10000;
+    uint256 private constant MAX_ADJUSTMENT_BASIS_POINTS = 100; // 1%
+
     uint8 private constant GLP_DECIMALS = 18;
     uint8 private constant USDG_DECIMALS = 18;
     uint8 private constant PRICE_DECIMALS = 30;
@@ -37,6 +41,12 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     address public usdg;
     address public glp;
 
+    /* 
+    The token oracle, used to verify the difference in points between GMX and Archi oracles, for verification purposes only.
+     */
+    mapping(address => address) public priceFeeds;
+    mapping(address => uint256) public adjustmentBasisPoints;
+
     // @custom:oz-upgrades-unsafe-allow constructor
     // solhint-disable-next-line no-empty-blocks
     constructor() initializer {}
@@ -45,6 +55,8 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     function initialize(address _addressProvider) external initializer {
         require(_addressProvider != address(0), "CreditAggregator: _addressProvider cannot be 0x0");
         require(_addressProvider.isContract(), "CreditAggregator: _addressProvider is not a contract");
+
+        __Ownable_init();
 
         addressProvider = _addressProvider;
     }
@@ -111,7 +123,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     /// @param _tokenAmountIn token amount
     /// @return GLP amount, amount precision correspond to token decimals
     /// @return gmx fee, precision 100
-    function getBuyGlpToAmount(address _fromToken, uint256 _tokenAmountIn) external view override returns (uint256, uint256) {
+    function getBuyGlpToAmount(address _fromToken, uint256 _tokenAmountIn) public view override returns (uint256, uint256) {
         require(_fromToken != address(0), "CreditAggregator: _fromToken cannot be 0x0");
         require(_tokenAmountIn > 0, "CreditAggregator: _tokenAmountIn cannot be 0");
 
@@ -136,7 +148,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     /// @param _tokenAmountIn token amount
     /// @return GLP amount, amount precision correspond to token decimals
     /// @return gmx fee, precision 100
-    function getSellGlpFromAmount(address _fromToken, uint256 _tokenAmountIn) external view override returns (uint256, uint256) {
+    function getSellGlpFromAmount(address _fromToken, uint256 _tokenAmountIn) public view override returns (uint256, uint256) {
         require(_fromToken != address(0), "CreditAggregator: _fromToken cannot be 0x0");
         require(_tokenAmountIn > 0, "CreditAggregator: _tokenAmountIn cannot be 0");
 
@@ -163,7 +175,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     /// @param _glpAmountIn token amount
     /// @return token amount, precision 1e18
     /// @return gmx fee, precision 100
-    function getBuyGlpFromAmount(address _toToken, uint256 _glpAmountIn) external view override returns (uint256, uint256) {
+    function getBuyGlpFromAmount(address _toToken, uint256 _glpAmountIn) public view override returns (uint256, uint256) {
         require(_toToken != address(0), "CreditAggregator: _toToken cannot be 0x0");
         require(_glpAmountIn > 0, "CreditAggregator: _glpAmountIn cannot be 0");
 
@@ -188,7 +200,7 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     /// @param _glpAmountIn glp token amount
     /// @return token amount, precision 1e18
     /// @return gmx fee, precision 100
-    function getSellGlpToAmount(address _toToken, uint256 _glpAmountIn) external view override returns (uint256, uint256) {
+    function getSellGlpToAmount(address _toToken, uint256 _glpAmountIn) public view override returns (uint256, uint256) {
         require(_toToken != address(0), "CreditAggregator: _toToken cannot be 0x0");
         require(_glpAmountIn > 0, "CreditAggregator: _glpAmountIn cannot be 0");
 
@@ -205,6 +217,24 @@ contract CreditAggregator is Initializable, ICreditAggregator {
         tokenAmountOut = tokenAmountOut.mul(BASIS_POINTS_DIVISOR - feeBasisPoints).div(BASIS_POINTS_DIVISOR);
 
         return (tokenAmountOut, feeBasisPoints);
+    }
+
+    /// @notice calculate amount of token GLP can be bought with sold token
+    /// @dev parameter refers to getSellGlpFromAmount
+    function getSellGlpFromAmounts(address[] calldata _tokens, uint256[] calldata _amounts) external view override returns (uint256, uint256[] memory) {
+        require(_tokens.length == _amounts.length, "CreditAggregator: Length mismatch");
+
+        uint256 totalAmountOut;
+        uint256[] memory amountOuts = new uint256[](_tokens.length);
+
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            (uint256 amountOut, ) = getSellGlpFromAmount(_tokens[i], _amounts[i]);
+
+            totalAmountOut += amountOut;
+            amountOuts[i] = amountOut;
+        }
+
+        return (totalAmountOut, amountOuts);
     }
 
     /// @notice format presion
@@ -258,12 +288,12 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     }
 
     /// @notice Get the result of GMX taxBasisPoints function
-    function _taxBasisPoints() internal view returns(uint256) {
+    function _taxBasisPoints() internal view returns (uint256) {
         return IGmxVault(vault).taxBasisPoints();
     }
-    
+
     /// @notice Get the result of GMX mintBurnFeeBasisPoints function
-    function _mintBurnFeeBasisPoints() internal view returns(uint256) {
+    function _mintBurnFeeBasisPoints() internal view returns (uint256) {
         return IGmxVault(vault).mintBurnFeeBasisPoints();
     }
 
@@ -300,15 +330,39 @@ contract CreditAggregator is Initializable, ICreditAggregator {
         return price + diff;
     }
 
+    /// @notice verify if the price returned by the GMX oracle is within the range
+    /// @param _token token address
+    /// @param _price token price
+    function validateTokenPrice(address _token, uint256 _price) public view returns (uint256) {
+        address tokenFeed = priceFeeds[_token];
+
+        require(_price > 0, "CreditAggregator: _price cannot be 0");
+
+        if (tokenFeed == address(0)) return _price;
+
+        IPriceFeed priceFeed = IPriceFeed(tokenFeed);
+
+        uint256 latestPrice = uint256(priceFeed.latestAnswer());
+
+        require(latestPrice > 0, "CreditAggregator: Invalid price");
+
+        latestPrice = adjustForDecimals(latestPrice, priceFeed.decimals(), PRICE_DECIMALS);
+
+        uint256 adjustmentBps = adjustmentBasisPoints[_token];
+        uint256 minPrice = (latestPrice * (BASIS_POINTS_DIVISOR - adjustmentBps)) / BASIS_POINTS_DIVISOR;
+        uint256 maxPrice = (latestPrice * (BASIS_POINTS_DIVISOR + adjustmentBps)) / BASIS_POINTS_DIVISOR;
+
+        require(_price >= minPrice && _price <= maxPrice, "CreditAggregator: Price overflowed");
+        return _price;
+    }
+
     /// @notice get token max price
     /// @param _token token address
     /// @return get GMX vault getMaxPrice
     function getMaxPrice(address _token) public view returns (uint256) {
         uint256 price = IGmxVault(vault).getMaxPrice(_token);
 
-        require(price > 0, "CreditAggregator: GMX oracle encounters problems");
-
-        return price;
+        return validateTokenPrice(_token, price);
     }
 
     /// @notice get token min price
@@ -317,8 +371,23 @@ contract CreditAggregator is Initializable, ICreditAggregator {
     function getMinPrice(address _token) public view returns (uint256) {
         uint256 price = IGmxVault(vault).getMinPrice(_token);
 
-        require(price > 0, "CreditAggregator: GMX oracle encounters problems");
+        return validateTokenPrice(_token, price);
+    }
 
-        return price;
+    /// @notice set basis point to compare the difference between Archi oracle and GMX oracle
+    function setAdjustmentBasisPoints(address _token, uint256 _adjustmentBps) external onlyOwner {
+        require(_adjustmentBps <= MAX_ADJUSTMENT_BASIS_POINTS, "CreditAggregator: MAX_ADJUSTMENT_BASIS_POINTS limit exceeded");
+
+        adjustmentBasisPoints[_token] = _adjustmentBps;
+    }
+
+    /// @notice set up Archi oracle, only for verification
+    function setPriceFeeds(address _token, address _priceFeed) external onlyOwner {
+        priceFeeds[_token] = _priceFeed;
+    }
+
+    /// @dev Rewriting methods to prevent accidental operations by the owner.
+    function renounceOwnership() public virtual override onlyOwner {
+        revert("CreditAggregator: Not allowed");
     }
 }

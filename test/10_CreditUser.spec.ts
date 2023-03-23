@@ -35,7 +35,7 @@ describe("CreditUser contract", () => {
     });
 
     it("Test #createUserLendCredit", async () => {
-        const [deployer] = await ethers.getSigners();
+        const [deployer, liquidator] = await ethers.getSigners();
 
         const GMXDepositor = await ethers.getContractFactory("GMXDepositor");
         const gmxDepositor = await GMXDepositor.deploy();
@@ -63,6 +63,7 @@ describe("CreditUser contract", () => {
             userLendCreditParams.depositor,
             userLendCreditParams.token,
             userLendCreditParams.amountIn,
+            0,
             userLendCreditParams.borrowedTokens,
             userLendCreditParams.ratios
         );
@@ -104,7 +105,7 @@ describe("CreditUser contract", () => {
 
         await creditUser.isTerminated(deployer.address, borrowedIndex);
         await creditUser.isTimeout(deployer.address, borrowedIndex, BigNumber.from(60 * 60));
-        await creditUser.destroy(deployer.address, borrowedIndex);
+        await creditUser.destroy(deployer.address, borrowedIndex, ethers.constants.AddressZero);
     });
 
     it("Test modifiers", async () => {
