@@ -6,8 +6,8 @@ import "../../interfaces/IPriceFeed.sol";
 
 /// @title Simulate Chainlink Oracle Contract
 contract MockPriceFeed is IPriceFeed {
-    uint256 private _latestTimestamp;
-    uint256 private _latestRound;
+    uint80 private _latestTimestamp;
+    uint80 private _latestRound;
     int256 private _latestAnswer;
 
     mapping(uint256 => int256) private _prices;
@@ -18,7 +18,7 @@ contract MockPriceFeed is IPriceFeed {
     }
 
     function setPrice(
-        uint256 _roundId,
+        uint80 _roundId,
         uint256 _timestamp,
         int256 _price
     ) external {
@@ -26,27 +26,44 @@ contract MockPriceFeed is IPriceFeed {
         _timestamps[_roundId] = _timestamp;
 
         _latestRound = _roundId;
-        _latestTimestamp = _timestamp;
         _latestAnswer = _price;
     }
 
-    function latestAnswer() external view override returns (int256) {
-        return _latestAnswer;
+    function description() external pure override returns (string memory) {
+        return "MockPriceFeed";
     }
 
-    function latestTimestamp() external view override returns (uint256) {
-        return _latestTimestamp;
+    function version() external pure override returns (uint256) {
+        return 1;
     }
 
-    function latestRound() external view override returns (uint256) {
-        return _latestRound;
+    function getRoundData(uint80 _roundId)
+        external
+        view
+        override
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        )
+    {
+        return (roundId, _prices[_roundId], _timestamps[_roundId], _timestamps[_roundId], _latestRound);
     }
 
-    function getAnswer(uint256 _roundId) external view override returns (int256) {
-        return _prices[_roundId];
-    }
-
-    function getTimestamp(uint256 _roundId) external view override returns (uint256) {
-        return _timestamps[_roundId];
+    function latestRoundData()
+        external
+        view
+        override
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        )
+    {
+        return (_latestRound, _latestAnswer, _latestTimestamp, _latestTimestamp, _latestRound);
     }
 }

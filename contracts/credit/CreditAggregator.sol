@@ -342,7 +342,9 @@ contract CreditAggregator is Initializable, ICreditAggregator, OwnableUpgradeabl
 
         IPriceFeed priceFeed = IPriceFeed(tokenFeed);
 
-        uint256 latestPrice = uint256(priceFeed.latestAnswer());
+        (, int256 answer, , , ) = priceFeed.latestRoundData();
+
+        uint256 latestPrice = uint256(answer);
 
         require(latestPrice > 0, "CreditAggregator: Invalid price");
 
