@@ -14,6 +14,13 @@ const ZERO = `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`;
 const LIQUIDATE_THRESHOLD = 400;
 const MAX_LOAN_DURATION = 365;
 
+async function _swapToken(toToken: string, ethAmountIn: BigNumber) {
+    const [deployer] = await ethers.getSigners();
+    const gmxRouter = await ethers.getContractAt(require("../scripts/abis/GmxRouter"), "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", deployer);
+
+    await gmxRouter.swapETHToTokens([TOKENS.WETH, toToken], 0, deployer.address, { value: ethAmountIn });
+}
+
 async function mockPriceFeed(tokenFeeds: Array<any>, cb: CallableFunction) {
     const [deployer] = await ethers.getSigners();
 
@@ -416,8 +423,6 @@ describe("CreditCaller & CreditManager contract", () => {
         });
     });
 
-    
-
     it("Test the liquidation situation of different assets for loans", async () => {
         const [deployer] = await ethers.getSigners();
 
@@ -428,15 +433,19 @@ describe("CreditCaller & CreditManager contract", () => {
 
         await wethVault.addLiquidity(supplyAmountIn, { value: supplyAmountIn });
 
-        const daiVault = await ethers.getContractAt("ERC20Vault", db.get("DAIVaultProxy").logic, deployer);
-        const dai = await ethers.getContractAt(require("../scripts/abis/DAI"), TOKENS.DAI, deployer);
-        const daiMinter = await impersonatedSigner(`0x10E6593CDda8c58a1d0f14C5164B376352a55f2F`);
+        await _swapToken(TOKENS.USDT, ethers.utils.parseEther("2"));
 
-        await dai.connect(daiMinter).mint(deployer.address, supplyAmountIn.mul(10000));
-        await dai.approve(daiVault.address, supplyAmountIn.mul(10000));
-        await daiVault.addLiquidity(supplyAmountIn.mul(10000));
+        const usdtVault = await ethers.getContractAt("ERC20Vault", db.get("USDTVaultProxy").logic, deployer);
+        const usdt = await ethers.getContractAt("ERC20", TOKENS.USDT, deployer);
+        await usdt.approve(usdtVault.address, ethers.constants.MaxUint256);
+        // const dai = await ethers.getContractAt(require("../scripts/abis/DAI"), TOKENS.DAI, deployer);
+        // const daiMinter = await impersonatedSigner(`0x10E6593CDda8c58a1d0f14C5164B376352a55f2F`);
 
-        await caller.openLendCredit(db.get("GMXDepositorProxy").logic, ZERO, collateralAmountIn, [TOKENS.WETH, TOKENS.DAI], [200, 700], deployer.address, {
+        // await dai.connect(daiMinter).mint(deployer.address, supplyAmountIn.mul(10000));
+        // await dai.approve(daiVault.address, supplyAmountIn.mul(10000));
+        await usdtVault.addLiquidity(await usdt.balanceOf(deployer.address));
+
+        await caller.openLendCredit(db.get("GMXDepositorProxy").logic, ZERO, collateralAmountIn, [TOKENS.WETH, TOKENS.USDT], [200, 100], deployer.address, {
             value: collateralAmountIn,
         });
 
@@ -445,12 +454,12 @@ describe("CreditCaller & CreditManager contract", () => {
 
         const aggregator = await ethers.getContractAt("CreditAggregator", db.get("CreditAggregatorProxy").logic, deployer);
         const ethPrice = await aggregator.getTokenPrice(TOKENS.WETH);
-        const daiPrice = await aggregator.getTokenPrice(TOKENS.DAI);
+        const usdtPrice = await aggregator.getTokenPrice(TOKENS.USDT);
 
         await mockPriceFeed(
             [
                 { token: TOKENS.WETH, price: ethPrice.mul(100 + 900).div(100) },
-                { token: TOKENS.DAI, price: daiPrice },
+                { token: TOKENS.USDT, price: usdtPrice },
             ],
             async () => {
                 const health = await caller.getUserCreditHealth(deployer.address, creditCounts);
