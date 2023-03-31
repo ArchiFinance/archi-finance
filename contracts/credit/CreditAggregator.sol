@@ -342,7 +342,11 @@ contract CreditAggregator is Initializable, ICreditAggregator, OwnableUpgradeabl
 
         IPriceFeed priceFeed = IPriceFeed(tokenFeed);
 
-        (, int256 answer, , , ) = priceFeed.latestRoundData();
+        (, int256 answer, , uint256 updatedAt, ) = priceFeed.latestRoundData();
+
+        if (block.timestamp - 60 minutes > updatedAt) {
+            revert("CreditAggregator: The oracle may be down or paused");
+        }
 
         uint256 latestPrice = uint256(answer);
 

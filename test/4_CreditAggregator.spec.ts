@@ -125,9 +125,23 @@ describe("CreditAggregator contract", () => {
 
         await aggregator.getMinPrice(TOKENS.WETH);
 
-        expect(aggregator.validateTokenPrice(TOKENS.WETH, 0)).to.be.revertedWith("CreditAggregator: _price cannot be 0");
-        expect(aggregator.validateTokenPrice(TOKENS.WETH, wethPrice.mul(2))).to.be.revertedWith("CreditAggregator: Price overflowed");
-        expect(aggregator.validateTokenPrice(TOKENS.WETH, wethPrice.div(2))).to.be.revertedWith("CreditAggregator: Price overflowed");
+        try {
+            await aggregator.validateTokenPrice(TOKENS.WETH, 0);
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditAggregator: _price cannot be 0/);
+        }
+
+        try {
+            await aggregator.validateTokenPrice(TOKENS.WETH, wethPrice.mul(2));
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditAggregator: Price overflowed/);
+        }
+
+        try {
+            await aggregator.validateTokenPrice(TOKENS.WETH, wethPrice.div(2));
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditAggregator: Price overflowed/);
+        }
 
         const [deployer] = await ethers.getSigners();
 
@@ -136,8 +150,22 @@ describe("CreditAggregator contract", () => {
         const mockPriceFeed = await MockPriceFeed.deployed();
 
         await aggregator.setPriceFeeds(TOKENS.FRAX, mockPriceFeed.address);
+        await mockPriceFeed.setPrice(1, 0, fraxPrice);
 
-        expect(aggregator.validateTokenPrice(TOKENS.FRAX, fraxPrice)).to.be.revertedWith("CreditAggregator: Invalid price");
+        try {
+            await aggregator.validateTokenPrice(TOKENS.FRAX, fraxPrice);
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditAggregator: The oracle may be down or paused/);
+        }
+
+        const testTimeAt = Math.floor(new Date().getTime() / 1000);
+        await mockPriceFeed.setPrice(2, testTimeAt, 0);
+
+        try {
+            await aggregator.validateTokenPrice(TOKENS.FRAX, fraxPrice);
+        } catch (error: any) {
+            expect(error.message).to.match(/CreditAggregator: Invalid price/);
+        }
     });
 
     it("Test #getBuyGlpFromAmount", async () => {

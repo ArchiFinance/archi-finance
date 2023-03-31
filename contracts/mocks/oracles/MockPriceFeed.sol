@@ -6,7 +6,7 @@ import "../../interfaces/IPriceFeed.sol";
 
 /// @title Simulate Chainlink Oracle Contract
 contract MockPriceFeed is IPriceFeed {
-    uint80 private _latestTimestamp;
+    uint256 private _latestTimestamp;
     uint80 private _latestRound;
     int256 private _latestAnswer;
 
@@ -27,6 +27,7 @@ contract MockPriceFeed is IPriceFeed {
 
         _latestRound = _roundId;
         _latestAnswer = _price;
+        _latestTimestamp = _timestamp;
     }
 
     function description() external pure override returns (string memory) {
