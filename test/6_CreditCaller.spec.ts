@@ -58,7 +58,11 @@ async function getWethBorrowedRewardVsTokenSupply(vault: AbstractVault): Promise
 describe("CreditCaller & CreditManager contract", () => {
     beforeEach(async () => {
         await Base();
-        await Vault();
+        await Vault([
+            { tokenName: "WETH", isPasued: false },
+            { tokenName: "USDT", isPasued: false },
+            { tokenName: "USDC", isPasued: false },
+        ]);
         await Initialize();
     });
 

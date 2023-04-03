@@ -93,25 +93,26 @@ async function updateContract(deployer: Signer, vault: any) {
     await vaultMC.waitTx();
 }
 
-async function main() {
+async function main(vaults?: any) {
     const [deployer] = await ethers.getSigners();
 
-    const vaults: any = [];
+    const results: any = [];
+    const tasks: any = [];
 
-    await Promise.all([
-        await deployVault(deployer, "WETH", false),
-        await deployVault(deployer, "USDT", false),
-        await deployVault(deployer, "USDC", false),
-        await deployVault(deployer, "DAI", false),
-        //
-    ]).then(async (values) => {
+    if (vaults === undefined) {
+        for (const v in TOKENS) tasks.push(await deployVault(deployer, v, false));
+    } else {
+        for (const v of vaults) tasks.push(await deployVault(deployer, v.tokenName, v.isPasued));
+    }
+
+    await Promise.all(tasks).then(async (values) => {
         for (const idx in values) {
             await updateContract(deployer, values[idx]);
-            vaults.push(values[idx]);
+            results.push(values[idx]);
         }
     });
 
-    if (vaults.length > 0) {
+    if (results.length > 0) {
         const creditCaller = await ethers.getContractAt("CreditCaller", db.get("CreditCallerProxy").logic, deployer);
         const depositor = await ethers.getContractAt("GMXDepositor", db.get("GMXDepositorProxy").logic, deployer);
         const collateralReward = await ethers.getContractAt("CollateralReward", db.get("CollateralRewardProxy").logic, deployer);
@@ -124,15 +125,15 @@ async function main() {
             vaultRewards: [],
         };
 
-        for (const idx in vaults) {
-            strategy.vaults.push(vaults[idx].vault.address);
-            strategy.vaultRewards.push(vaults[idx].vaultRewardDistributor.address);
+        for (const idx in results) {
+            strategy.vaults.push(results[idx].vault.address);
+            strategy.vaultRewards.push(results[idx].vaultRewardDistributor.address);
         }
 
         multicallTxs.addEncodeFunctionData("addStrategy", [strategy.depositor, strategy.collateralReward, strategy.vaults, strategy.vaultRewards]);
 
-        for (const idx in vaults) {
-            multicallTxs.addEncodeFunctionData("addVaultManager", [vaults[idx].token, vaults[idx].vaultManager.address]);
+        for (const idx in results) {
+            multicallTxs.addEncodeFunctionData("addVaultManager", [results[idx].token, results[idx].vaultManager.address]);
         }
 
         await multicallTxs.waitTx();

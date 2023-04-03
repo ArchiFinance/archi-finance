@@ -11,7 +11,11 @@ import { deployProxyAdmin } from "./LoadFixture";
 describe("CreditRewardTracker contract", () => {
     before(async () => {
         await Base();
-        await Vault();
+        await Vault([
+            { tokenName: "WETH", isPasued: false },
+            { tokenName: "USDT", isPasued: false },
+            { tokenName: "USDC", isPasued: false },
+        ]);
         await Initial();
     });
 

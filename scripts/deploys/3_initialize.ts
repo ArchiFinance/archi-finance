@@ -1,25 +1,24 @@
 /* eslint-disable node/no-missing-import */
 import { ethers } from "hardhat";
-import { db, waitTx } from "../utils";
+import { db, TOKENS, waitTx } from "../utils";
 
 async function main() {
     const [deployer] = await ethers.getSigners();
 
     const CreditRewardTracker = await ethers.getContractAt("CreditRewardTracker", db.get("CreditRewardTrackerProxy").logic, deployer);
-
     const GMXDepositor = await ethers.getContractAt("GMXDepositor", db.get("GMXDepositorProxy").logic, deployer);
-    const WETHVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("WETHVaultManagerProxy").logic, deployer);
-    const USDTVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("USDTVaultManagerProxy").logic, deployer);
-    const USDCVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("USDCVaultManagerProxy").logic, deployer);
-    const DAIVaultManagerProxy = await ethers.getContractAt("CreditManager", db.get("DAIVaultManagerProxy").logic, deployer);
 
-    await waitTx([
-        await CreditRewardTracker.addDepositor(GMXDepositor.address),
-        await CreditRewardTracker.addManager(WETHVaultManagerProxy.address),
-        await CreditRewardTracker.addManager(USDTVaultManagerProxy.address),
-        await CreditRewardTracker.addManager(USDCVaultManagerProxy.address),
-        await CreditRewardTracker.addManager(DAIVaultManagerProxy.address),
-    ]);
+    for (const tokenName in TOKENS) {
+        const vaultManager = db.get(`${tokenName}VaultManagerProxy`);
+
+        if (vaultManager !== undefined) {
+            const vaultManagerInstance = await ethers.getContractAt("CreditManager", vaultManager.logic, deployer);
+
+            await waitTx([await CreditRewardTracker.addManager(vaultManagerInstance.address)]);
+        }
+    }
+
+    await waitTx([await CreditRewardTracker.addDepositor(GMXDepositor.address)]);
 }
 
 export { main };
